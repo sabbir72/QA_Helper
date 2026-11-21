@@ -1,0 +1,6 @@
+{
+  "name": "FlowGuard QA",
+  "description": "Business logic, workflow validation, role-permission matrix, state transition, date/time rules, data dependency, and UI coverage QA engineering platform and Chrome Extension.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
