@@ -4,11 +4,13 @@ import {
   CalendarClock,
   CheckCircle2,
   DatabaseZap,
+  Download,
   FileText,
   GitBranch,
   MessageSquareMore,
   Play,
   Plus,
+  RotateCcw,
   XCircle,
 } from 'lucide-react';
 import {
@@ -53,6 +55,12 @@ export const BusinessLogicView: React.FC<BusinessLogicViewProps> = ({
   const [newTo, setNewTo] = useState('');
   const [newAllowed, setNewAllowed] = useState<'allow' | 'forbid'>('allow');
   const [newGuard, setNewGuard] = useState('');
+
+  // Interactive State Journey Playtester
+  const [playtestStatus, setPlaytestStatus] = useState<string>('');
+  const [playtestLog, setPlaytestLog] = useState<
+    Array<{ id: string; from: string; to: string; allowed: boolean; guard: string }>
+  >([]);
 
   const entityTransitions = useMemo(
     () => project.stateTransitions.filter((r) => r.entity === testEntity),
@@ -147,6 +155,70 @@ export const BusinessLogicView: React.FC<BusinessLogicViewProps> = ({
     );
     onUpdateProject({ ...project, dateTimeRules: next });
     onNotify?.('Date & time rule checked.');
+  };
+
+  const activePlaytestNode =
+    playtestStatus && stateNodes.includes(playtestStatus)
+      ? playtestStatus
+      : stateNodes[0] || testFrom;
+
+  const handlePlaytestStep = (targetState: string) => {
+    const match = entityTransitions.find(
+      (r) =>
+        r.fromState.toLowerCase() === activePlaytestNode.toLowerCase() &&
+        r.toState.toLowerCase() === targetState.toLowerCase()
+    );
+    const allowed = match ? match.allowed : false;
+    const guard = match
+      ? match.guardCondition
+      : `No transition rule defined from "${activePlaytestNode}" to "${targetState}".`;
+
+    setTestFrom(activePlaytestNode);
+    setTestTo(targetState);
+    runTransitionCheck(testEntity, activePlaytestNode, targetState);
+
+    setPlaytestLog((prev) => [
+      {
+        id: `pt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        from: activePlaytestNode,
+        to: targetState,
+        allowed,
+        guard,
+      },
+      ...prev.slice(0, 14),
+    ]);
+
+    if (allowed) {
+      setPlaytestStatus(targetState);
+      onNotify?.(`State advanced: ${activePlaytestNode} → ${targetState}`);
+    } else {
+      onNotify?.(`Blocked transition caught: ${activePlaytestNode} → ${targetState}`);
+    }
+  };
+
+  const handleExportStateCsv = () => {
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const rows = [
+      ['Entity', 'From State', 'To State', 'Result', 'Guard Condition', 'Last Status'].join(','),
+      ...project.stateTransitions.map((r) =>
+        [
+          esc(r.entity),
+          esc(r.fromState),
+          esc(r.toState),
+          esc(r.allowed ? 'ALLOWED' : 'BLOCKED'),
+          esc(r.guardCondition),
+          esc(r.lastVerifiedStatus),
+        ].join(',')
+      ),
+    ];
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'state'}-matrix.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    onNotify?.(t('Exported state transition matrix (.csv).', 'স্টেট ম্যাট্রিক্স (.csv) ডাউনলোড হয়েছে।'));
   };
 
   // Layout coordinates for the interactive SVG State Lifecycle Diagram
@@ -470,6 +542,116 @@ export const BusinessLogicView: React.FC<BusinessLogicViewProps> = ({
               </div>
             )}
           </div>
+
+          {/* Interactive State Machine Playtester & CSV Export */}
+          {stateNodes.length > 0 && (
+            <div className="rounded-xl border border-amber-200/80 dark:border-amber-900/60 bg-white dark:bg-slate-900 p-5 space-y-4 shadow-xs">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <Play className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    {t('Interactive State Journey Playtester', 'ইন্টারঅ্যাক্টিভ স্টেট জার্নি প্লে-টেস্টার')}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {t(
+                      'Click any target status below to step through the lifecycle and verify allowed paths vs blocked skips.',
+                      'নিচের যেকোনো পরবর্তী স্ট্যাটাসে ক্লিক করে ধাপে ধাপে স্টেট ট্রানজিশন ও গার্ড রুলস পরীক্ষা করুন।'
+                    )}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPlaytestStatus(stateNodes[0] || '');
+                      setPlaytestLog([]);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    {t('Reset Journey', 'রিসেট')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportStateCsv}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/30 text-xs font-semibold text-amber-800 dark:text-amber-300 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    {t('Export CSV', 'CSV ডাউনলোড')}
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950 p-3.5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-slate-500 dark:text-slate-400">
+                    {t('Current State:', 'বর্তমান স্ট্যাটাস:')}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-md bg-amber-600 text-white font-semibold">
+                    {activePlaytestNode}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mr-1">
+                    {t('Try moving to →', 'পরবর্তী ধাপ টেস্ট করুন →')}
+                  </span>
+                  {stateNodes
+                    .filter((n) => n !== activePlaytestNode)
+                    .map((target) => {
+                      const rule = entityTransitions.find(
+                        (r) =>
+                          r.fromState.toLowerCase() === activePlaytestNode.toLowerCase() &&
+                          r.toState.toLowerCase() === target.toLowerCase()
+                      );
+                      const isAllowed = Boolean(rule?.allowed);
+                      return (
+                        <button
+                          key={target}
+                          type="button"
+                          onClick={() => handlePlaytestStep(target)}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-xs font-semibold cursor-pointer transition-colors ${
+                            isAllowed
+                              ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
+                              : 'border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 hover:bg-rose-100'
+                          }`}
+                        >
+                          {isAllowed ? (
+                            <CheckCircle2 className="w-3 h-3" />
+                          ) : (
+                            <XCircle className="w-3 h-3" />
+                          )}
+                          <span>{target}</span>
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {playtestLog.length > 0 && (
+                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                  {playtestLog.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className={`flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 rounded-lg border text-xs ${
+                        entry.allowed
+                          ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-200'
+                          : 'border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20 text-rose-800 dark:text-rose-200'
+                      }`}
+                    >
+                      <span className="font-semibold">
+                        {entry.from} {entry.allowed ? '→' : '✕→'} {entry.to}
+                      </span>
+                      <span className="font-mono text-[11px] opacity-85 truncate max-w-md">
+                        {entry.guard}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Add Transition Rule */}
           <form

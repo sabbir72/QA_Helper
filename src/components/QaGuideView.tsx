@@ -5,10 +5,12 @@ import {
   Blocks,
   BookOpen,
   CheckCircle2,
+  Cloud,
   FolderArchive,
   GitBranch,
   Layers,
   Megaphone,
+  Navigation,
   PenTool,
   Radar,
   Search,
@@ -28,6 +30,7 @@ interface QaGuideViewProps {
       | 'coverage'
       | 'diagram'
       | 'alerts'
+      | 'fakeGps'
       | 'extension'
       | 'settings'
   ) => void;
@@ -45,6 +48,7 @@ interface GuideCardItem {
     | 'coverage'
     | 'diagram'
     | 'alerts'
+    | 'fakeGps'
     | 'extension';
   icon: React.ComponentType<{ className?: string }>;
   colorBorder: string;
@@ -313,6 +317,62 @@ const GUIDE_CARDS: GuideCardItem[] = [
     ],
     tipEn: 'Try the "10 sec (Quick)" preset to test the alert popup right away.',
     tipBn: 'তাৎক্ষণিক পরীক্ষা করতে "১০ সেকেন্ড (কুইক)" বাটনে ক্লিক করে দেখতে পারেন।',
+  },
+  {
+    id: 'guide_fake_gps',
+    category: 'testing',
+    targetSection: 'fakeGps',
+    icon: Navigation,
+    colorBorder: 'border-cyan-200/90 dark:border-cyan-900/60',
+    colorBadge: 'bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300',
+    colorIconBg: 'bg-cyan-100 dark:bg-cyan-950/80 text-cyan-600 dark:text-cyan-400',
+    colorBtn: 'bg-cyan-600 hover:bg-cyan-700 text-white',
+    titleEn: '10. Fake GPS & Geolocation Spoofing',
+    titleBn: '১০. ফেইক জিপিএস ও লোকেশন টেস্টিং',
+    summaryEn:
+      'Override navigator.geolocation in the browser tab using custom latitude/longitude, city presets, accuracy jitter, or a live walking route for delivery & geofence QA.',
+    summaryBn:
+      'যেকোনো ওয়েবসাইটের লোকেশন, ডেলিভারি রেডিয়াস বা জিওফেন্স টেস্ট করতে নির্দিষ্ট অক্ষাংশ-দ্রাঘিমাংশ, সিটি প্রিসেট বা চলমান রুট সেট করুন।',
+    stepsEn: [
+      'Open "Fake GPS", search or pick coordinates on the interactive map, or save custom location profiles.',
+      'Turn ON Geolocation Spoofing — the extension injects the coordinates directly into the active webpage.',
+      'Click "Probe Live Location" to confirm pages see your spoofed coordinates.',
+    ],
+    stepsBn: [
+      '"ফেইক জিপিএস" মডিউলে ম্যাপে ক্লিক করে বা কোঅর্ডিনেট লিখে আপনার লোকেশন সেট করুন।',
+      'Fake GPS চালু করলে ক্রোম এক্সটেনশন সরাসরি ব্রাউজার ট্যাবে নতুন লোকেশন পাঠাবে।',
+      '"Probe Live Location" বাটনে ক্লিক করে যাচাই করুন ওয়েবপেজ ফেইক লোকেশন পাচ্ছে কিনা।',
+    ],
+    tipEn: 'Saved GPS profiles belong strictly to your signed-in account.',
+    tipBn: 'আপনার সেভ করা সব জিপিএস প্রোফাইল কেবল আপনার অ্যাকাউন্টেই সংরক্ষিত থাকে।',
+  },
+  {
+    id: 'guide_cloud_sync',
+    category: 'extension',
+    targetSection: 'extension',
+    icon: Cloud,
+    colorBorder: 'border-emerald-200/90 dark:border-emerald-900/60',
+    colorBadge: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300',
+    colorIconBg: 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400',
+    colorBtn: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+    titleEn: '11. Per-User Accounts & Web ↔ Extension Live Sync',
+    titleBn: '১১. আলাদা ইউজার অ্যাকাউন্ট ও ওয়েব ↔ এক্সটেনশন সিঙ্ক',
+    summaryEn:
+      'Every new account starts cleanly with zero data. Pair your Chrome Extension with your Web account so flows, rules, bugs, alerts, and GPS profiles sync privately.',
+    summaryBn:
+      'প্রতিটি নতুন ইউজার একদম ০ (জিরো) ডাটা থেকে শুরু করে। ওয়েব অ্যাপের সাথে ক্রোম এক্সটেনশন পেয়ার করলে আপনার সব সেভ করা ডাটা সম্পূর্ণ আলাদা ও সিঙ্কড থাকবে।',
+    stepsEn: [
+      'Click "Sign In" in the top bar to create your isolated account (starts with 0 items).',
+      'Open Chrome Extension → click "Pair Installed Extension" or copy the Pairing Token.',
+      'Paste the token in the Extension popup — sign out anytime to reset the extension back to zero data.',
+    ],
+    stepsBn: [
+      'ওপরের বারের "সাইন ইন" বাটনে ক্লিক করে আপনার নিজস্ব অ্যাকাউন্ট তৈরি করুন (০ ডাটা দিয়ে শুরু)।',
+      'ক্রোম এক্সটেনশন ট্যাবে গিয়ে "Pair Installed Extension" চাপুন অথবা পেয়ারিং টোকেন কপি করুন।',
+      'এক্সটেনশন পপআপে টোকেন দিলে ওয়েব ও এক্সটেনশন লাইভ সিঙ্ক হয়ে যাবে; সাইন-আউট করলে ডাটা আবার ০ হয়ে যাবে।',
+    ],
+    tipEn: 'Strict per-user isolation ensures User A data never leaks to User B.',
+    tipBn: 'একজন ইউজারের সেভ করা কোনো ডাটা কখনোই অন্য ইউজারের অ্যাকাউন্টে যাবে না।',
   },
 ];
 

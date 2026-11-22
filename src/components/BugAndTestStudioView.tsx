@@ -286,6 +286,8 @@ export const BugAndTestStudioView: React.FC<BugAndTestStudioViewProps> = ({
   const [bugStatusFilter, setBugStatusFilter] = useState<'all' | BugStatus>('all');
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const screenshotInputRef = useRef<HTMLInputElement>(null);
+  const [showCurlImporter, setShowCurlImporter] = useState(false);
+  const [curlPasteText, setCurlPasteText] = useState('');
 
   // -------------------- TEST CASE STATE --------------------
   const [tcTitle, setTcTitle] = useState('');
@@ -536,6 +538,106 @@ ${b.stepsToReproduce}
       [header.join(','), ...rows].join('\n')
     );
     onNotify?.(t('Bug report CSV exported.', 'বাগ রিপোর্ট CSV ডাউনলোড হয়েছে।'));
+  };
+
+  const handleApplyCurlToBug = () => {
+    const raw = curlPasteText.trim();
+    if (!raw) return;
+
+    const urlMatch = raw.match(/https?:\/\/[^\s'"]+/i);
+    const methodMatch = raw.match(/(?:-X|--request)\s+['"]?(GET|POST|PUT|PATCH|DELETE)/i)
+      || raw.match(/\b(GET|POST|PUT|PATCH|DELETE)\s+\//i);
+    const statusMatch = raw.match(/\b([45]\d{2})\b/);
+    const msgMatch = raw.match(/"(?:message|error|detail)"\s*:\s*"([^"]+)"/i);
+
+    const method = (methodMatch?.[1] || 'HTTP').toUpperCase();
+    const endpoint = urlMatch ? urlMatch[0] : '/api/endpoint';
+    const shortPath = (() => {
+      try {
+        return urlMatch ? new URL(urlMatch[0]).pathname : endpoint;
+      } catch {
+        return endpoint;
+      }
+    })();
+    const statusCode = statusMatch ? statusMatch[1] : 'Error';
+    const errDetail = msgMatch ? msgMatch[1] : '';
+
+    setBugModule('API / Network');
+    setBugTitle(
+      `${method} ${shortPath} returns ${statusCode}${errDetail ? ` — ${errDetail.slice(0, 60)}` : ''}`
+    );
+    if (statusCode.startsWith('5')) {
+      setBugSeverity('critical');
+      setBugPriority('P0');
+    } else if (statusCode.startsWith('4')) {
+      setBugSeverity('major');
+      setBugPriority('P1');
+    }
+    setBugSteps(
+      `1. Trigger request: ${method} ${endpoint}\n2. Inspect HTTP response status and body\n3. Observe error returned to client`
+    );
+    setBugExpected('API responds with 2xx status code and expected payload.');
+    setBugActual(
+      `Received HTTP ${statusCode}${errDetail ? `: "${errDetail}"` : ' failure response'}.`
+    );
+    setBugConsoleNote(raw.slice(0, 500));
+    setShowCurlImporter(false);
+    setCurlPasteText('');
+    onNotify?.(
+      t(
+        'Bug fields auto-filled from cURL / HTTP response.',
+        'cURL / HTTP এরর থেকে বাগের তথ্য অটো-ফিল হয়েছে।'
+      )
+    );
+  };
+
+  const handleCopySignoffReport = () => {
+    const openCount = bugs.filter((b) => b.status === 'open').length;
+    const inProgCount = bugs.filter((b) => b.status === 'in_progress').length;
+    const retestCount = bugs.filter((b) => b.status === 'retest').length;
+    const closedCount = bugs.filter((b) => b.status === 'closed').length;
+    const blockerOpen = bugs.filter(
+      (b) => b.status !== 'closed' && (b.severity === 'blocker' || b.severity === 'critical')
+    );
+
+    const tcPassed = testCases.filter((c) => c.status === 'passed').length;
+    const tcFailed = testCases.filter((c) => c.status === 'failed').length;
+    const flowStepsTotal = project.flows.reduce((acc, f) => acc + f.steps.length, 0);
+    const flowStepsPassed = project.flows.reduce(
+      (acc, f) => acc + f.steps.filter((s) => s.status === 'passed').length,
+      0
+    );
+
+    const statusLabel =
+      blockerOpen.length > 0 || tcFailed > 0
+        ? 'HOLD — Open Blockers / Failures Present'
+        : bugs.length === 0 && testCases.length === 0 && project.flows.length === 0
+          ? 'NO QA EXECUTION RECORDED YET'
+          : 'READY FOR RELEASE SIGN-OFF';
+
+    const report = `## QA Release Sign-Off Summary — ${project.name}
+- **Environment:** ${project.activeEnvironment.toUpperCase()} (${project.domain})
+- **Generated:** ${new Date().toLocaleString()}
+- **Verdict:** **${statusLabel}**
+
+### Execution Metrics
+- **Workflow Flows:** ${project.flows.length} flows (${flowStepsPassed}/${flowStepsTotal} steps passed)
+- **Test Cases:** ${testCases.length} total (${tcPassed} passed, ${tcFailed} failed)
+- **Bug Reports:** ${bugs.length} total (Open: ${openCount}, In Progress: ${inProgCount}, Retest: ${retestCount}, Closed: ${closedCount})
+
+${
+  blockerOpen.length > 0
+    ? `### Open Blocker / Critical Bugs\n${blockerOpen
+        .map((b) => `- [${b.bugKey}] (${b.severity.toUpperCase()}) ${b.title}`)
+        .join('\n')}`
+    : '### Open Blocker / Critical Bugs\n- None'
+}`;
+
+    markCopied(
+      'qa_signoff_report',
+      report,
+      t('Copied QA Sign-Off Report to clipboard!', 'QA সাইন-অফ রিপোর্ট কপি হয়েছে!')
+    );
   };
 
   const filteredBugs = useMemo(() => {
@@ -920,7 +1022,46 @@ ${b.stepsToReproduce}
               >
                 {t('Recorded Steps', 'রেকর্ডেড স্টেপ')} ({recording.recordedSteps.length})
               </button>
+              <button
+                type="button"
+                onClick={() => setShowCurlImporter(!showCurlImporter)}
+                className="px-2.5 py-1 rounded border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 text-[11px] font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-100 cursor-pointer whitespace-nowrap"
+              >
+                {t('Paste cURL / API Error', 'cURL / API এরর')}
+              </button>
             </div>
+
+            {showCurlImporter && (
+              <div className="rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20 p-3 space-y-2">
+                <textarea
+                  rows={3}
+                  value={curlPasteText}
+                  onChange={(e) => setCurlPasteText(e.target.value)}
+                  placeholder={t(
+                    'Paste failed cURL command or HTTP 4xx/5xx JSON error response here...',
+                    'ফেইল হওয়া cURL অথবা HTTP 4xx/5xx এরর রেসপন্স এখানে পেস্ট করুন...'
+                  )}
+                  className="w-full px-2.5 py-1.5 text-[11px] font-mono rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCurlImporter(false)}
+                    className="px-2 py-1 text-[11px] text-slate-500 cursor-pointer"
+                  >
+                    {t('Cancel', 'বাতিল')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApplyCurlToBug}
+                    disabled={!curlPasteText.trim()}
+                    className="px-2.5 py-1 rounded bg-rose-600 text-white text-[11px] font-semibold disabled:opacity-40 cursor-pointer"
+                  >
+                    {t('Auto-Fill Bug Fields', 'অটো-ফিল করুন')}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <input
               type="text"
@@ -1118,6 +1259,18 @@ ${b.stepsToReproduce}
                   <option value="closed">Closed</option>
                 </select>
 
+                <button
+                  type="button"
+                  onClick={handleCopySignoffReport}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer whitespace-nowrap"
+                >
+                  {copiedId === 'qa_signoff_report' ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <ClipboardCopy className="w-3.5 h-3.5" />
+                  )}
+                  {t('QA Sign-Off', 'সাইন-অফ রিপোর্ট')}
+                </button>
                 <button
                   type="button"
                   onClick={handleExportBugsCsv}

@@ -3,9 +3,12 @@ import {
   Activity,
   ArrowDown,
   ArrowUp,
+  Bug,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  ClipboardCopy,
   Code2,
   Copy,
   Download,
@@ -16,6 +19,7 @@ import {
   Play,
   Plus,
   Radio,
+  RotateCcw,
   Search,
   ShieldCheck,
   Terminal,
@@ -27,6 +31,7 @@ import {
 import { pickLang } from '../i18n/translations';
 import {
   AppLanguage,
+  BugReportItem,
   FlowStep,
   ProjectWorkspace,
   RecordingState,
@@ -64,6 +69,208 @@ const ACTION_LABELS: Record<StepAction, string> = {
   assert: 'Verify visible',
 };
 
+const FLOW_BLUEPRINTS: Array<{
+  id: string;
+  labelEn: string;
+  labelBn: string;
+  name: string;
+  module: string;
+  steps: Array<Omit<FlowStep, 'id' | 'status' | 'observedResult'>>;
+}> = [
+  {
+    id: 'auth_login',
+    labelEn: 'Auth Login Flow',
+    labelBn: 'লগইন ফ্লো',
+    name: 'User Authentication & Session Check',
+    module: 'Auth & Security',
+    steps: [
+      {
+        title: 'Enter valid email address',
+        action: 'type',
+        targetElement: '[data-testid="login-email"]',
+        testData: 'qa.user@example.com',
+        isSensitiveData: false,
+        expectedRule: 'Email input accepts valid format without error',
+      },
+      {
+        title: 'Enter account password',
+        action: 'type',
+        targetElement: '[data-testid="login-password"]',
+        testData: '••••••••',
+        isSensitiveData: true,
+        expectedRule: 'Password stays masked during input',
+      },
+      {
+        title: 'Submit login form',
+        action: 'click',
+        targetElement: '[data-testid="login-submit"]',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Redirects to dashboard with valid session cookie',
+      },
+      {
+        title: 'Verify dashboard heading visible',
+        action: 'assert',
+        targetElement: 'h1',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Authenticated greeting renders cleanly',
+      },
+    ],
+  },
+  {
+    id: 'form_crud',
+    labelEn: 'Form CRUD Validation',
+    labelBn: 'ফর্ম সেভ ও ভ্যালিডেশন',
+    name: 'Create & Validate Record Form',
+    module: 'Forms & Data',
+    steps: [
+      {
+        title: 'Fill required title field',
+        action: 'type',
+        targetElement: '[name="title"]',
+        testData: 'QA Verification Record',
+        isSensitiveData: false,
+        expectedRule: 'Input validates non-empty string cleanly',
+      },
+      {
+        title: 'Select category dropdown',
+        action: 'select',
+        targetElement: 'select[name="category"]',
+        testData: 'standard',
+        isSensitiveData: false,
+        expectedRule: 'Selected option updates form state',
+      },
+      {
+        title: 'Click Save Record button',
+        action: 'click',
+        targetElement: 'button[type="submit"]',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'API returns 200/201 and new row appears in list',
+      },
+    ],
+  },
+  {
+    id: 'cart_checkout',
+    labelEn: 'Cart & Checkout Flow',
+    labelBn: 'কার্ট ও চেকআউট ফ্লো',
+    name: 'Add to Cart & Total Calculation',
+    module: 'Checkout & Billing',
+    steps: [
+      {
+        title: 'Click Add to Cart button',
+        action: 'click',
+        targetElement: '[data-testid="add-to-cart"]',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Cart badge increments immediately',
+      },
+      {
+        title: 'Open Checkout summary',
+        action: 'click',
+        targetElement: '[data-testid="checkout-btn"]',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Subtotal, VAT, and Net Total compute accurately',
+      },
+      {
+        title: 'Verify payable total visible',
+        action: 'assert',
+        targetElement: '[data-testid="order-total"]',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Final payable total is non-zero and formatted',
+      },
+    ],
+  },
+  {
+    id: 'search_pagination',
+    labelEn: 'Search & Table Filter',
+    labelBn: 'সার্চ ও টেবিল ফিল্টার',
+    name: 'Search, Filter & Pagination Reset',
+    module: 'Listing & Search',
+    steps: [
+      {
+        title: 'Type search keyword into filter box',
+        action: 'type',
+        targetElement: '[data-testid="search-input"]',
+        testData: 'Order-102',
+        isSensitiveData: false,
+        expectedRule: 'Results narrow down and reset pagination to page 1',
+      },
+      {
+        title: 'Verify matching table row renders',
+        action: 'assert',
+        targetElement: 'table tbody tr',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Matching record shows cleanly without console errors',
+      },
+      {
+        title: 'Clear search filter',
+        action: 'click',
+        targetElement: '[data-testid="clear-filter"]',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Full paginated list restores cleanly',
+      },
+    ],
+  },
+  {
+    id: 'negative_validation',
+    labelEn: 'Negative Validation',
+    labelBn: 'নেগেটিভ ভ্যালিডেশন',
+    name: 'Empty & Invalid Input Guard',
+    module: 'Form Validation',
+    steps: [
+      {
+        title: 'Enter whitespace only into required field',
+        action: 'type',
+        targetElement: 'input[required]',
+        testData: '   ',
+        isSensitiveData: false,
+        expectedRule: 'Whitespace should not bypass required check',
+      },
+      {
+        title: 'Click Submit without valid input',
+        action: 'click',
+        targetElement: 'button[type="submit"]',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Submission blocked; no 500 API error triggered',
+      },
+      {
+        title: 'Verify inline validation message shown',
+        action: 'assert',
+        targetElement: '[role="alert"]',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Clear validation message appears under invalid field',
+      },
+    ],
+  },
+];
+
+function getSelectorHealth(selector: string): {
+  tier: 'resilient' | 'moderate' | 'fragile';
+  labelEn: string;
+  labelBn: string;
+} {
+  const s = selector.trim();
+  if (!s) return { tier: 'fragile', labelEn: 'Empty', labelBn: 'খালি' };
+  if (/data-testid|data-qa|data-cy|^#[a-zA-Z][\w-]*$/i.test(s)) {
+    return { tier: 'resilient', labelEn: 'Resilient', labelBn: 'স্থায়ী' };
+  }
+  if (/\[(?:name|aria-label|role|type|placeholder)=/i.test(s)) {
+    return { tier: 'moderate', labelEn: 'Moderate', labelBn: 'মোটামুটি' };
+  }
+  if (/nth-child|nth-of-type|\s>\s|\./.test(s) && s.split(/\s+/).length >= 3) {
+    return { tier: 'fragile', labelEn: 'Fragile', labelBn: 'দুর্বল' };
+  }
+  return { tier: 'moderate', labelEn: 'Moderate', labelBn: 'মোটামুটি' };
+}
+
 export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
   project,
   lang,
@@ -76,12 +283,15 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
   const [selectedFlowId, setSelectedFlowId] = useState<string>(
     project.flows[0]?.id || ''
   );
+  const [flowSearch, setFlowSearch] = useState('');
   const [stepSearch, setStepSearch] = useState('');
+  const [stepStatusFilter, setStepStatusFilter] = useState<'all' | FlowStep['status']>('all');
   const [showStagedDrawer, setShowStagedDrawer] = useState(false);
   const [showCodegenStudio, setShowCodegenStudio] = useState(false);
   const [codegenLang, setCodegenLang] = useState<CodegenTarget>('pytest-py');
   const [showRealismInfo, setShowRealismInfo] = useState(false);
   const [probingLiveDom, setProbingLiveDom] = useState(false);
+  const [copiedRunReport, setCopiedRunReport] = useState(false);
 
   // Optional Screen Video Recorder (.webm)
   const [screenRecActive, setScreenRecActive] = useState(false);
@@ -95,6 +305,10 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
   const [codegenInput, setCodegenInput] = useState('');
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
   const [showNewFlow, setShowNewFlow] = useState(false);
+  const [editingFlowMeta, setEditingFlowMeta] = useState(false);
+  const [editFlowName, setEditFlowName] = useState('');
+  const [editFlowModule, setEditFlowModule] = useState('');
+  const [editFlowUrl, setEditFlowUrl] = useState('');
   const [exportPreview, setExportPreview] = useState<
     'pytest-py' | 'playwright-ts' | 'playwright-js' | 'json' | null
   >(null);
@@ -134,17 +348,30 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
     [project.flows, selectedFlowId]
   );
 
+  const filteredFlows = useMemo(() => {
+    const q = flowSearch.trim().toLowerCase();
+    if (!q) return project.flows;
+    return project.flows.filter(
+      (f) =>
+        f.name.toLowerCase().includes(q) ||
+        f.module.toLowerCase().includes(q) ||
+        f.targetUrl.toLowerCase().includes(q)
+    );
+  }, [project.flows, flowSearch]);
+
   const filteredSteps = useMemo(() => {
     if (!activeFlow) return [];
     const q = stepSearch.trim().toLowerCase();
-    if (!q) return activeFlow.steps;
-    return activeFlow.steps.filter(
-      (s) =>
+    return activeFlow.steps.filter((s) => {
+      if (stepStatusFilter !== 'all' && s.status !== stepStatusFilter) return false;
+      if (!q) return true;
+      return (
         s.title.toLowerCase().includes(q) ||
         s.targetElement.toLowerCase().includes(q) ||
         s.expectedRule.toLowerCase().includes(q)
-    );
-  }, [activeFlow, stepSearch]);
+      );
+    });
+  }, [activeFlow, stepSearch, stepStatusFilter]);
 
   const summary = useMemo(() => {
     if (!activeFlow) return { total: 0, passed: 0, failed: 0, pending: 0, pct: 0 };
@@ -600,6 +827,245 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
     onNotify?.(`Created test flow "${created.name}".`);
   };
 
+  const handleCreateFromBlueprint = (bpId: string) => {
+    const bp = FLOW_BLUEPRINTS.find((b) => b.id === bpId);
+    if (!bp) return;
+    const nowStamp = Date.now();
+    const id = `flow_${nowStamp}`;
+    const created: WorkflowFlow = {
+      id,
+      name: bp.name,
+      module: bp.module,
+      targetUrl: flowUrl.trim() || `https://${project.domain}/`,
+      lastRunAt: null,
+      steps: bp.steps.map((s, idx) => ({
+        ...s,
+        id: `step_${nowStamp}_${idx}`,
+        observedResult: 'Ready to verify',
+        status: 'pending',
+      })),
+    };
+    onUpdateProject({
+      ...project,
+      flows: [...project.flows, created],
+    });
+    setSelectedFlowId(id);
+    setShowNewFlow(false);
+    onNotify?.(
+      pickLang(
+        lang,
+        `Created "${created.name}" (${created.steps.length} steps).`,
+        `"${created.name}" ফ্লো (${created.steps.length}টি স্টেপসহ) তৈরি হয়েছে।`
+      )
+    );
+  };
+
+  const handleDuplicateFlow = () => {
+    if (!activeFlow) return;
+    const nowStamp = Date.now();
+    const copyId = `flow_${nowStamp}`;
+    const duplicated: WorkflowFlow = {
+      ...activeFlow,
+      id: copyId,
+      name: `${activeFlow.name} (Copy)`,
+      lastRunAt: null,
+      steps: activeFlow.steps.map((s, idx) => ({
+        ...s,
+        id: `step_${nowStamp}_${idx}`,
+        status: 'pending',
+        verificationMode: 'manual',
+        observedResult: 'Cloned — ready to verify',
+      })),
+    };
+    onUpdateProject({
+      ...project,
+      flows: [...project.flows, duplicated],
+    });
+    setSelectedFlowId(copyId);
+    onNotify?.(
+      pickLang(
+        lang,
+        `Duplicated flow as "${duplicated.name}".`,
+        `"${duplicated.name}" নামে ফ্লো কপি করা হয়েছে।`
+      )
+    );
+  };
+
+  const handleCloneStep = (step: FlowStep) => {
+    if (!activeFlow) return;
+    const cloned: FlowStep = {
+      ...step,
+      id: `step_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      title: `${step.title} (Copy)`,
+      status: 'pending',
+      verificationMode: 'manual',
+      observedResult: 'Cloned — ready to verify',
+    };
+    const nextFlows = project.flows.map((f) =>
+      f.id === activeFlow.id ? { ...f, steps: [...f.steps, cloned] } : f
+    );
+    onUpdateProject({ ...project, flows: nextFlows });
+    onNotify?.(
+      pickLang(
+        lang,
+        `Cloned step "${step.title}".`,
+        `"${step.title}" স্টেপটি কপি করা হয়েছে।`
+      )
+    );
+  };
+
+  const startEditingFlowMeta = () => {
+    if (!activeFlow) return;
+    setEditFlowName(activeFlow.name);
+    setEditFlowModule(activeFlow.module);
+    setEditFlowUrl(activeFlow.targetUrl);
+    setEditingFlowMeta(true);
+  };
+
+  const handleSaveFlowMeta = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeFlow || !editFlowName.trim()) return;
+    const nextFlows = project.flows.map((f) =>
+      f.id === activeFlow.id
+        ? {
+            ...f,
+            name: editFlowName.trim(),
+            module: editFlowModule.trim() || 'Core Workflow',
+            targetUrl: editFlowUrl.trim() || `https://${project.domain}/`,
+          }
+        : f
+    );
+    onUpdateProject({ ...project, flows: nextFlows });
+    setEditingFlowMeta(false);
+    onNotify?.(
+      pickLang(lang, 'Flow details updated.', 'ফ্লো-এর তথ্য আপডেট হয়েছে।')
+    );
+  };
+
+  const handleDeleteActiveFlow = () => {
+    if (!activeFlow) return;
+    onUpdateProject({
+      ...project,
+      flows: project.flows.filter((f) => f.id !== activeFlow.id),
+    });
+  };
+
+  const handleBulkStepStatus = (nextStatus: 'pending' | 'passed') => {
+    if (!activeFlow || activeFlow.steps.length === 0) return;
+    const now = new Date().toISOString();
+    const nextFlows = project.flows.map((f) =>
+      f.id === activeFlow.id
+        ? {
+            ...f,
+            lastRunAt: nextStatus === 'passed' ? now : f.lastRunAt,
+            steps: f.steps.map((s) => ({
+              ...s,
+              status: nextStatus,
+              verificationMode: 'manual' as const,
+              observedResult:
+                nextStatus === 'passed'
+                  ? 'Marked passed in manual regression'
+                  : 'Reset — ready to verify',
+            })),
+          }
+        : f
+    );
+    onUpdateProject({ ...project, flows: nextFlows });
+    onNotify?.(
+      nextStatus === 'passed'
+        ? pickLang(
+            lang,
+            `Marked all ${activeFlow.steps.length} steps as Passed.`,
+            `সব ${activeFlow.steps.length}টি স্টেপ পাস হিসেবে মার্ক হয়েছে।`
+          )
+        : pickLang(
+            lang,
+            `Reset all ${activeFlow.steps.length} steps to Not Run.`,
+            `সব ${activeFlow.steps.length}টি স্টেপ রিসেট করা হয়েছে।`
+          )
+    );
+  };
+
+  const handleLogBugFromStep = (step: FlowStep) => {
+    if (!activeFlow) return;
+    const existingBugs = project.bugReports || [];
+    const now = new Date().toISOString();
+    const stepIndex = activeFlow.steps.findIndex((s) => s.id === step.id);
+    const replaySteps = activeFlow.steps
+      .slice(0, stepIndex >= 0 ? stepIndex + 1 : activeFlow.steps.length)
+      .map(
+        (s, i) =>
+          `${i + 1}. [${s.action.toUpperCase()}] ${s.title} (${s.targetElement})${
+            s.testData ? ` -> "${s.testData}"` : ''
+          }`
+      )
+      .join('\n');
+
+    const newBug: BugReportItem = {
+      id: `bug_flow_${Date.now()}`,
+      bugKey: `BUG-${String(existingBugs.length + 1).padStart(2, '0')}`,
+      title: `[Flow: ${activeFlow.name}] ${step.title}`,
+      module: activeFlow.module || 'Workflow Flow',
+      severity: step.status === 'failed' ? 'critical' : 'major',
+      priority: step.status === 'failed' ? 'P0' : 'P1',
+      status: 'open',
+      environment: `${project.activeEnvironment.toUpperCase()} · ${activeFlow.targetUrl}`,
+      browserInfo:
+        typeof navigator !== 'undefined' ? navigator.platform || 'Browser' : 'Browser',
+      stepsToReproduce: replaySteps || `1. Target ${step.targetElement}`,
+      expectedResult: step.expectedRule || 'Step completes successfully',
+      actualResult:
+        step.observedResult || `Failed on selector ${step.targetElement}`,
+      consoleOrApiNote: `Flow ID: ${activeFlow.id} | Selector: ${step.targetElement}`,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    onUpdateProject({
+      ...project,
+      bugReports: [newBug, ...existingBugs],
+    });
+    onNotify?.(
+      pickLang(
+        lang,
+        `Logged ${newBug.bugKey} to Bug Studio from step "${step.title}".`,
+        `"${step.title}" স্টেপ থেকে ${newBug.bugKey} বাগ রিপোর্টে সেভ হয়েছে।`
+      )
+    );
+  };
+
+  const handleCopyFlowRunReport = async () => {
+    if (!activeFlow) return;
+    const lines = [
+      `## Flow Execution Report — ${activeFlow.name}`,
+      `- **Module:** ${activeFlow.module}`,
+      `- **URL:** ${activeFlow.targetUrl}`,
+      `- **Environment:** ${project.activeEnvironment.toUpperCase()}`,
+      `- **Progress:** ${summary.passed}/${summary.total} Passed (${summary.pct}%) · ${summary.failed} Failed · ${summary.pending} Not Run`,
+      ``,
+      `| # | Step | Locator | Status | Observed |`,
+      `|---|---|---|---|---|`,
+      ...activeFlow.steps.map(
+        (s, idx) =>
+          `| ${idx + 1} | ${s.title} | \`${s.targetElement}\` | ${s.status.toUpperCase()} | ${s.observedResult || '-'} |`
+      ),
+    ];
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      setCopiedRunReport(true);
+      setTimeout(() => setCopiedRunReport(false), 1800);
+      onNotify?.(
+        pickLang(
+          lang,
+          'Copied Markdown flow run report!',
+          'ফ্লো টেস্ট রিপোর্ট কপি হয়েছে!'
+        )
+      );
+    } catch {
+      onNotify?.('Clipboard unavailable.');
+    }
+  };
+
   const generatedJson = useMemo(
     () => (activeFlow ? JSON.stringify(activeFlow, null, 2) : ''),
     [activeFlow]
@@ -664,7 +1130,7 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
                   )}
                 </span>
                 {recording.isRecording && (
-                  <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-bold uppercase animate-pulse">
+                  <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white text-[10px] font-bold uppercase tracking-wide">
                     REC LIVE
                   </span>
                 )}
@@ -893,7 +1359,7 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
         <div className="lg:col-span-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
           <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-200 dark:border-slate-800">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Test Flows ({project.flows.length})
+              {pickLang(lang, 'Test Flows', 'টেস্ট ফ্লো')} ({project.flows.length})
             </h2>
             <button
               type="button"
@@ -901,18 +1367,55 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-3.5 h-3.5" />
-              New Flow
+              {pickLang(lang, 'New Flow', 'নতুন ফ্লো')}
             </button>
           </div>
+
+          {project.flows.length > 0 && (
+            <div className="px-3 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={flowSearch}
+                  onChange={(e) => setFlowSearch(e.target.value)}
+                  placeholder={pickLang(lang, 'Filter flows by name or URL...', 'ফ্লো খুঁজুন...')}
+                  className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100"
+                />
+              </div>
+            </div>
+          )}
 
           {showNewFlow && (
             <form
               onSubmit={handleCreateFlow}
               className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 space-y-2.5"
             >
+              <div className="space-y-1.5 pb-1.5 border-b border-slate-200/80 dark:border-slate-700/70">
+                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  {pickLang(lang, 'Quick 1-Click SQA Blueprints', 'এক ক্লিকে রেডি ফ্লো')}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {FLOW_BLUEPRINTS.map((bp) => (
+                    <button
+                      key={bp.id}
+                      type="button"
+                      onClick={() => handleCreateFromBlueprint(bp.id)}
+                      className="px-2 py-1 rounded-md border border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 text-[11px] font-semibold hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer"
+                    >
+                      + {pickLang(lang, bp.labelEn, bp.labelBn)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <input
                 type="text"
-                placeholder="What are you testing? (e.g. Request Approval)"
+                placeholder={pickLang(
+                  lang,
+                  'What are you testing? (e.g. Request Approval)',
+                  'কী টেস্ট করছেন? (যেমন: রিকোয়েস্ট অ্যাপ্রুভাল)'
+                )}
                 value={flowName}
                 onChange={(e) => setFlowName(e.target.value)}
                 required
@@ -920,7 +1423,7 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
               />
               <input
                 type="text"
-                placeholder="Feature area (e.g. Request Forms)"
+                placeholder={pickLang(lang, 'Feature area (e.g. Request Forms)', 'মডিউল / ফিচার')}
                 value={flowModule}
                 onChange={(e) => setFlowModule(e.target.value)}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
@@ -938,20 +1441,25 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
                   onClick={() => setShowNewFlow(false)}
                   className="px-2.5 py-1.5 text-xs text-slate-600 dark:text-slate-400 cursor-pointer"
                 >
-                  Cancel
+                  {pickLang(lang, 'Cancel', 'বাতিল')}
                 </button>
                 <button
                   type="submit"
                   className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 text-white cursor-pointer"
                 >
-                  Create Flow
+                  {pickLang(lang, 'Create Flow', 'ফ্লো তৈরি করুন')}
                 </button>
               </div>
             </form>
           )}
 
           <div className="divide-y divide-slate-200 dark:divide-slate-800">
-            {project.flows.map((flow) => {
+            {filteredFlows.length === 0 && project.flows.length > 0 && (
+              <div className="p-5 text-center text-xs text-slate-500">
+                {pickLang(lang, 'No matching flows.', 'কোনো ফ্লো পাওয়া যায়নি।')}
+              </div>
+            )}
+            {filteredFlows.map((flow) => {
               const isSelected = activeFlow?.id === flow.id;
               const passCount = flow.steps.filter((s) => s.status === 'passed').length;
               const failCount = flow.steps.filter((s) => s.status === 'failed').length;
@@ -962,7 +1470,10 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
                 <button
                   key={flow.id}
                   type="button"
-                  onClick={() => setSelectedFlowId(flow.id)}
+                  onClick={() => {
+                    setSelectedFlowId(flow.id);
+                    setEditingFlowMeta(false);
+                  }}
                   className={`w-full text-left px-4 py-3.5 transition-colors cursor-pointer ${
                     isSelected
                       ? 'bg-blue-50/80 dark:bg-blue-950/30'
@@ -1021,10 +1532,30 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
             <>
               <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 truncate">
-                      {activeFlow.name}
-                    </h2>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 truncate">
+                        {activeFlow.name}
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={startEditingFlowMeta}
+                        title={pickLang(lang, 'Edit flow name & URL', 'ফ্লো নাম ও URL পরিবর্তন করুন')}
+                        aria-label="Edit flow metadata"
+                        className="p-1 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer shrink-0"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDeleteActiveFlow}
+                        title={pickLang(lang, 'Delete flow (moves to 3-day Recycle Bin)', 'ফ্লো ডিলিট করুন (রিসাইকেল বিনে যাবে)')}
+                        aria-label="Delete flow"
+                        className="p-1 rounded text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer shrink-0"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                       <span>{activeFlow.module}</span>
                       <span aria-hidden="true">·</span>
@@ -1033,7 +1564,7 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
                       </span>
                       <span aria-hidden="true">·</span>
                       <span className="font-mono tabular-nums">
-                        {summary.passed}/{summary.total} passed ({summary.pct}%)
+                        {summary.passed}/{summary.total} {pickLang(lang, 'passed', 'পাস')} ({summary.pct}%)
                       </span>
                     </div>
                   </div>
@@ -1078,7 +1609,28 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap cursor-pointer"
                     >
                       <Code2 className="w-3.5 h-3.5" />
-                      Export Test
+                      {pickLang(lang, 'Export Test', 'কোড এক্সপোর্ট')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCopyFlowRunReport}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap cursor-pointer"
+                    >
+                      {copiedRunReport ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <ClipboardCopy className="w-3.5 h-3.5" />
+                      )}
+                      {pickLang(lang, 'Copy Report', 'রিপোর্ট কপি')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDuplicateFlow}
+                      title={pickLang(lang, 'Clone this flow', 'ফ্লোটি কপি করুন')}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      {pickLang(lang, 'Duplicate', 'কপি করুন')}
                     </button>
                     <button
                       type="button"
@@ -1101,6 +1653,51 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {editingFlowMeta && (
+                  <form
+                    onSubmit={handleSaveFlowMeta}
+                    className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/50 dark:bg-blue-950/20 p-3 grid grid-cols-1 sm:grid-cols-3 gap-2.5"
+                  >
+                    <input
+                      type="text"
+                      value={editFlowName}
+                      onChange={(e) => setEditFlowName(e.target.value)}
+                      required
+                      placeholder={pickLang(lang, 'Flow Name', 'ফ্লো নাম')}
+                      className="px-2.5 py-1.5 text-xs rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                    <input
+                      type="text"
+                      value={editFlowModule}
+                      onChange={(e) => setEditFlowModule(e.target.value)}
+                      placeholder={pickLang(lang, 'Module', 'মডিউল')}
+                      className="px-2.5 py-1.5 text-xs rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="url"
+                        value={editFlowUrl}
+                        onChange={(e) => setEditFlowUrl(e.target.value)}
+                        placeholder="https://..."
+                        className="flex-1 min-w-0 px-2.5 py-1.5 text-xs font-mono rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                      />
+                      <button
+                        type="submit"
+                        className="px-2.5 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold cursor-pointer"
+                      >
+                        {pickLang(lang, 'Save', 'সেভ')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingFlowMeta(false)}
+                        className="px-2 py-1.5 text-xs text-slate-500 cursor-pointer"
+                      >
+                        {pickLang(lang, 'Cancel', 'বাতিল')}
+                      </button>
+                    </div>
+                  </form>
+                )}
 
                 {/* Test Realism & Verification Transparency Bar */}
                 <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60 p-3 space-y-2">
@@ -1173,26 +1770,74 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
                   )}
                 </div>
 
-                {/* Search & Progress Bar */}
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                  <div className="relative flex-1 min-w-[200px] max-w-xs">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={stepSearch}
-                      onChange={(e) => setStepSearch(e.target.value)}
-                      placeholder="Search steps..."
-                      className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2.5 text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                    <div className="w-28 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                      <div
-                        className="h-full bg-emerald-500 transition-all duration-200"
-                        style={{ width: `${summary.pct}%` }}
+                {/* Search, Status Filter & Bulk Regression Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
+                  <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
+                    <div className="relative flex-1 min-w-[160px] max-w-xs">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={stepSearch}
+                        onChange={(e) => setStepSearch(e.target.value)}
+                        placeholder={pickLang(lang, 'Search steps...', 'স্টেপ খুঁজুন...')}
+                        className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
                       />
                     </div>
-                    <span>{summary.pct}%</span>
+                    <div className="inline-flex items-center p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px]">
+                      {(
+                        [
+                          { id: 'all', labelEn: 'All', labelBn: 'সব' },
+                          { id: 'passed', labelEn: 'Passed', labelBn: 'পাস' },
+                          { id: 'failed', labelEn: 'Failed', labelBn: 'ফেইল' },
+                          { id: 'pending', labelEn: 'Not Run', labelBn: 'বাকি' },
+                        ] as const
+                      ).map((tab) => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setStepStatusFilter(tab.id)}
+                          className={`px-2 py-1 rounded-md font-semibold cursor-pointer ${
+                            stepStatusFilter === tab.id
+                              ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                              : 'text-slate-500 dark:text-slate-400'
+                          }`}
+                        >
+                          {pickLang(lang, tab.labelEn, tab.labelBn)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {activeFlow.steps.length > 0 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleBulkStepStatus('passed')}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-emerald-200 dark:border-emerald-900 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 cursor-pointer whitespace-nowrap"
+                        >
+                          <CheckCircle2 className="w-3 h-3" />
+                          {pickLang(lang, 'Pass All', 'সব পাস')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleBulkStepStatus('pending')}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer whitespace-nowrap"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          {pickLang(lang, 'Reset All', 'সব রিসেট')}
+                        </button>
+                      </>
+                    )}
+                    <div className="flex items-center gap-2 text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                      <div className="w-20 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 transition-all duration-200"
+                          style={{ width: `${summary.pct}%` }}
+                        />
+                      </div>
+                      <span>{summary.pct}%</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1659,131 +2304,179 @@ def test_codegen_setup(page: Page) -> None:
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-50/80 dark:bg-slate-800/40">
                         <th className="py-2.5 px-4 w-10">#</th>
-                        <th className="py-2.5 px-4">Step &amp; Element</th>
-                        <th className="py-2.5 px-4">Action / Input</th>
-                        <th className="py-2.5 px-4">Expected Rule</th>
-                        <th className="py-2.5 px-4">Status &amp; Source</th>
-                        <th className="py-2.5 px-4 text-right">Actions</th>
+                        <th className="py-2.5 px-4">
+                          {pickLang(lang, 'Step & Locator', 'স্টেপ ও লোকেটর')}
+                        </th>
+                        <th className="py-2.5 px-4">
+                          {pickLang(lang, 'Action / Input', 'অ্যাকশন ও ইনপুট')}
+                        </th>
+                        <th className="py-2.5 px-4">
+                          {pickLang(lang, 'Expected Rule', 'প্রত্যাশিত ফলাফল')}
+                        </th>
+                        <th className="py-2.5 px-4">
+                          {pickLang(lang, 'Status & Source', 'স্ট্যাটাস ও উৎস')}
+                        </th>
+                        <th className="py-2.5 px-4 text-right">
+                          {pickLang(lang, 'Actions', 'অ্যাকশন')}
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
-                      {filteredSteps.map((step, index) => (
-                        <tr
-                          key={step.id}
-                          className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors"
-                        >
-                          <td className="py-3.5 px-4 font-mono tabular-nums text-slate-400">
-                            {String(index + 1).padStart(2, '0')}
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <div className="font-semibold text-slate-900 dark:text-slate-100">
-                              {step.title}
-                            </div>
-                            <div className="mt-0.5 font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[220px]">
-                              {step.targetElement}
-                            </div>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <div className="text-slate-700 dark:text-slate-300 font-medium">
-                              {ACTION_LABELS[step.action] || step.action}
-                            </div>
-                            {step.testData && (
-                              <div className="mt-0.5 inline-flex items-center gap-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                {step.isSensitiveData && (
-                                  <Lock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                                )}
-                                <span>{step.testData}</span>
+                      {filteredSteps.map((step, index) => {
+                        const selHealth = getSelectorHealth(step.targetElement);
+                        return (
+                          <tr
+                            key={step.id}
+                            className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors"
+                          >
+                            <td className="py-3.5 px-4 font-mono tabular-nums text-slate-400">
+                              {String(index + 1).padStart(2, '0')}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <div className="font-semibold text-slate-900 dark:text-slate-100">
+                                {step.title}
                               </div>
-                            )}
-                          </td>
-                          <td className="py-3.5 px-4 max-w-[240px]">
-                            <div className="text-slate-700 dark:text-slate-300">
-                              {step.expectedRule}
-                            </div>
-                            <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                              {step.observedResult}
-                            </div>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleStepStatus(step.id)}
-                              title="Click to toggle status"
-                              className="inline-flex items-center gap-1.5 font-medium cursor-pointer whitespace-nowrap"
-                            >
-                              {step.status === 'passed' ? (
-                                <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  Passed
+                              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
+                                  {step.targetElement}
                                 </span>
-                              ) : step.status === 'failed' ? (
-                                <span className="inline-flex items-center gap-1 text-red-700 dark:text-red-400">
-                                  <XCircle className="w-3.5 h-3.5" />
-                                  Needs Fix
+                                <span
+                                  className={`text-[10px] font-mono font-semibold ${
+                                    selHealth.tier === 'resilient'
+                                      ? 'text-emerald-600 dark:text-emerald-400'
+                                      : selHealth.tier === 'moderate'
+                                        ? 'text-sky-600 dark:text-sky-400'
+                                        : 'text-amber-600 dark:text-amber-400'
+                                  }`}
+                                >
+                                  · {pickLang(lang, selHealth.labelEn, selHealth.labelBn)}
                                 </span>
-                              ) : (
-                                <span className="text-slate-500 dark:text-slate-400">
-                                  Not Run
-                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <div className="text-slate-700 dark:text-slate-300 font-medium">
+                                {ACTION_LABELS[step.action] || step.action}
+                              </div>
+                              {step.testData && (
+                                <div className="mt-0.5 inline-flex items-center gap-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                                  {step.isSensitiveData && (
+                                    <Lock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                  )}
+                                  <span>{step.testData}</span>
+                                </div>
                               )}
-                            </button>
-                            <div className="mt-1 text-[10px] font-mono">
-                              {step.verificationMode === 'live_dom' ? (
-                                <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-semibold">
-                                  <ShieldCheck className="w-3 h-3" />
-                                  Live DOM
-                                </span>
-                              ) : step.verificationMode === 'spec_check' ? (
-                                <span className="text-slate-400">Spec Check</span>
-                              ) : step.status !== 'pending' ? (
-                                <span className="text-slate-400">Recorded / Manual</span>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="py-3.5 px-4 text-right">
-                            <div className="inline-flex items-center gap-0.5">
-                              {!stepSearch && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMoveStep(index, -1)}
-                                    disabled={index === 0}
-                                    aria-label="Move step up"
-                                    className="p-1.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 cursor-pointer"
-                                  >
-                                    <ArrowUp className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMoveStep(index, 1)}
-                                    disabled={index === filteredSteps.length - 1}
-                                    aria-label="Move step down"
-                                    className="p-1.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 cursor-pointer"
-                                  >
-                                    <ArrowDown className="w-3.5 h-3.5" />
-                                  </button>
-                                </>
-                              )}
+                            </td>
+                            <td className="py-3.5 px-4 max-w-[240px]">
+                              <div className="text-slate-700 dark:text-slate-300">
+                                {step.expectedRule}
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                {step.observedResult}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4">
                               <button
                                 type="button"
-                                onClick={() => startEditingStep(step)}
-                                aria-label={`Edit step ${step.title}`}
-                                className="p-1.5 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                                onClick={() => handleToggleStepStatus(step.id)}
+                                title={pickLang(lang, 'Click to toggle status', 'স্ট্যাটাস পরিবর্তন করতে ক্লিক করুন')}
+                                className="inline-flex items-center gap-1.5 font-medium cursor-pointer whitespace-nowrap"
                               >
-                                <Pencil className="w-3.5 h-3.5" />
+                                {step.status === 'passed' ? (
+                                  <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    {pickLang(lang, 'Passed', 'পাস')}
+                                  </span>
+                                ) : step.status === 'failed' ? (
+                                  <span className="inline-flex items-center gap-1 text-red-700 dark:text-red-400">
+                                    <XCircle className="w-3.5 h-3.5" />
+                                    {pickLang(lang, 'Needs Fix', 'সমস্যা আছে')}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500 dark:text-slate-400">
+                                    {pickLang(lang, 'Not Run', 'রান হয়নি')}
+                                  </span>
+                                )}
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteStep(step.id)}
-                                aria-label={`Delete step ${step.title}`}
-                                className="p-1.5 rounded text-slate-400 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                              <div className="mt-1 text-[10px] font-mono">
+                                {step.verificationMode === 'live_dom' ? (
+                                  <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-semibold">
+                                    <ShieldCheck className="w-3 h-3" />
+                                    Live DOM
+                                  </span>
+                                ) : step.verificationMode === 'spec_check' ? (
+                                  <span className="text-slate-400">Spec Check</span>
+                                ) : step.status !== 'pending' ? (
+                                  <span className="text-slate-400">Recorded / Manual</span>
+                                ) : null}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 text-right">
+                              <div className="inline-flex items-center gap-0.5">
+                                {!stepSearch && stepStatusFilter === 'all' && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveStep(index, -1)}
+                                      disabled={index === 0}
+                                      aria-label="Move step up"
+                                      className="p-1.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 cursor-pointer"
+                                    >
+                                      <ArrowUp className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveStep(index, 1)}
+                                      disabled={index === filteredSteps.length - 1}
+                                      aria-label="Move step down"
+                                      className="p-1.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 cursor-pointer"
+                                    >
+                                      <ArrowDown className="w-3.5 h-3.5" />
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleLogBugFromStep(step)}
+                                  title={pickLang(lang, 'Log Bug from this step', 'এই স্টেপ থেকে বাগ রিপোর্ট তৈরি করুন')}
+                                  aria-label={`Log bug from step ${step.title}`}
+                                  className={`p-1.5 rounded cursor-pointer ${
+                                    step.status === 'failed'
+                                      ? 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                                      : 'text-slate-400 hover:text-rose-600 dark:hover:text-rose-400'
+                                  }`}
+                                >
+                                  <Bug className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCloneStep(step)}
+                                  title={pickLang(lang, 'Clone step', 'স্টেপ কপি করুন')}
+                                  aria-label={`Clone step ${step.title}`}
+                                  className="p-1.5 rounded text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => startEditingStep(step)}
+                                  aria-label={`Edit step ${step.title}`}
+                                  className="p-1.5 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteStep(step.id)}
+                                  aria-label={`Delete step ${step.title}`}
+                                  className="p-1.5 rounded text-slate-400 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

@@ -9,7 +9,89 @@
   let isInspecting = false;
   let highlightedEl = null;
   let previousOutline = '';
+  let fakeGpsConfig = null;
+  const FAKE_GPS_KEY = 'veripulse_fake_gps_v1';
   const SENSITIVE_RE = /password|passwd|secret|token|auth|bearer|api[_-]?key|ssn|salary|cvv/i;
+
+  function broadcastFakeGpsToMain(cfg) {
+    fakeGpsConfig = cfg || null;
+    try {
+      window.postMessage(
+        { source: 'VERIPULSE_GPS_CONFIG', config: fakeGpsConfig },
+        '*'
+      );
+    } catch {
+      // Ignore postMessage failure
+    }
+    updateFakeGpsBadge(fakeGpsConfig);
+  }
+
+  try {
+    chrome.storage.local.get([FAKE_GPS_KEY], (res) => {
+      if (chrome.runtime.lastError) return;
+      broadcastFakeGpsToMain(res[FAKE_GPS_KEY] || { enabled: false });
+    });
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'local') return;
+      if (changes[FAKE_GPS_KEY]) {
+        broadcastFakeGpsToMain(changes[FAKE_GPS_KEY].newValue || { enabled: false });
+      }
+    });
+  } catch {
+    // Ignore storage context errors
+  }
+
+  window.addEventListener('message', (ev) => {
+    if (ev.source !== window || !ev.data) return;
+    if (ev.data.source === 'VERIPULSE_GPS_REQUEST_CONFIG' && fakeGpsConfig !== null) {
+      window.postMessage(
+        { source: 'VERIPULSE_GPS_CONFIG', config: fakeGpsConfig },
+        '*'
+      );
+      return;
+    }
+    if (ev.data.source === 'VERIPULSE_WEB_PING') {
+      window.postMessage(
+        { source: 'VERIPULSE_EXTENSION_PONG', version: '1.1.0' },
+        '*'
+      );
+      return;
+    }
+    if (ev.data.source === 'VERIPULSE_WEB_PAIR_EXTENSION') {
+      const serverUrl = String(ev.data.serverUrl || window.location.origin);
+      const bearerToken = String(ev.data.bearerToken || '');
+      try {
+        chrome.runtime.sendMessage(
+          { type: 'VERIPULSE_CONNECT_SYNC', serverUrl, bearerToken },
+          (res) => {
+            window.postMessage(
+              {
+                source: 'VERIPULSE_WEB_PAIR_RESULT',
+                ok: Boolean(res?.ok),
+                user: res?.user || null,
+                error: res?.error || undefined,
+              },
+              '*'
+            );
+          }
+        );
+      } catch {
+        window.postMessage(
+          {
+            source: 'VERIPULSE_WEB_PAIR_RESULT',
+            ok: false,
+            error: 'Extension runtime unavailable.',
+          },
+          '*'
+        );
+      }
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    if (isRecording) updateRecordingIndicator(true);
+    if (fakeGpsConfig?.enabled) updateFakeGpsBadge(fakeGpsConfig);
+  });
 
   try {
     chrome.runtime.sendMessage({ type: 'TESTALLY_GET_STATUS' }, (res) => {
@@ -17,6 +99,9 @@
       if (res?.recording?.isRecording) {
         isRecording = true;
         updateRecordingIndicator(true);
+      }
+      if (res?.fakeGps) {
+        broadcastFakeGpsToMain(res.fakeGps);
       }
     });
   } catch {
@@ -165,6 +250,163 @@
         testState: 'Untested',
       };
     });
+  }
+
+  function scanFormFieldsForAutofill() {
+    const nodes = Array.from(document.querySelectorAll('input, textarea, select'));
+    const fields = [];
+    for (let idx = 0; idx < nodes.length && fields.length < 45; idx += 1) {
+      const node = nodes[idx];
+      const tag = node.tagName.toLowerCase();
+      const inputType = (node.getAttribute('type') || (tag === 'select' ? 'select' : tag === 'textarea' ? 'textarea' : 'text')).toLowerCase();
+      if (['hidden', 'submit', 'button', 'reset', 'image', 'file'].includes(inputType)) continue;
+      if (node.disabled || node.readOnly) continue;
+
+      const style = window.getComputedStyle(node);
+      const visible =
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        node.offsetParent !== null;
+      if (!visible) continue;
+
+      const id = node.id || '';
+      const labelEl = id
+        ? document.querySelector(`label[for="${CSS?.escape ? CSS.escape(id) : id}"]`)
+        : node.closest('label');
+      const labelText = (
+        (labelEl ? labelEl.textContent : '') ||
+        node.getAttribute('aria-label') ||
+        node.getAttribute('placeholder') ||
+        node.getAttribute('name') ||
+        id ||
+        `Field ${fields.length + 1}`
+      )
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 90);
+
+      const options =
+        tag === 'select'
+          ? Array.from(node.options || [])
+              .map((o) => (o.value || o.textContent || '').trim())
+              .filter((v) => Boolean(v) && !/^select\b/i.test(v))
+              .slice(0, 20)
+          : [];
+
+      const sensitive = isSensitiveElement(node);
+      const selector = buildStableSelector(node);
+      fields.push({
+        id: `dom_${fields.length + 1}`,
+        label: labelText,
+        name: node.getAttribute('name') || id || '',
+        idAttr: id,
+        selector,
+        tagName: tag,
+        type: inputType,
+        placeholder: (node.getAttribute('placeholder') || '').slice(0, 90),
+        required: Boolean(node.required || node.getAttribute('aria-required') === 'true'),
+        options,
+        currentValue: sensitive ? '' : String(node.value || '').slice(0, 100),
+        isSensitive: sensitive,
+      });
+    }
+    return fields;
+  }
+
+  function setNativeControlValue(el, rawVal) {
+    const tag = el.tagName;
+    const type = (el.getAttribute('type') || '').toLowerCase();
+
+    if (type === 'checkbox' || type === 'radio') {
+      const normalized = String(rawVal ?? '').trim().toLowerCase();
+      const shouldCheck = ['true', '1', 'yes', 'on', 'checked'].includes(normalized);
+      if (type === 'radio') {
+        if (shouldCheck || normalized === String(el.value || '').toLowerCase()) {
+          el.click();
+        }
+      } else if (el.checked !== shouldCheck) {
+        el.click();
+      }
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+
+    if (tag === 'SELECT') {
+      const targetStr = String(rawVal ?? '').trim().toLowerCase();
+      const opts = Array.from(el.options || []);
+      const matched =
+        opts.find((o) => String(o.value || '').trim().toLowerCase() === targetStr) ||
+        opts.find((o) => String(o.textContent || '').trim().toLowerCase() === targetStr) ||
+        opts.find((o) => String(o.textContent || '').trim().toLowerCase().includes(targetStr)) ||
+        opts.find((o) => Boolean(o.value));
+      if (!matched) return false;
+      const selectSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+      if (selectSetter) selectSetter.call(el, matched.value);
+      else el.value = matched.value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }
+
+    const proto =
+      tag === 'TEXTAREA'
+        ? window.HTMLTextAreaElement.prototype
+        : window.HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    const nextVal = String(rawVal ?? '');
+    if (setter) {
+      setter.call(el, nextVal);
+    } else {
+      el.value = nextVal;
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new Event('blur', { bubbles: true }));
+    return true;
+  }
+
+  function autofillWindowFields(items) {
+    const list = Array.isArray(items) ? items : [];
+    let filledCount = 0;
+    let skippedCount = 0;
+    for (const item of list) {
+      if (!item || !item.selector) {
+        skippedCount += 1;
+        continue;
+      }
+      let target = null;
+      try {
+        target = document.querySelector(item.selector);
+      } catch {
+        target = null;
+      }
+      if (!target && item.name) {
+        try {
+          target = document.querySelector(`[name="${escapeAttr(item.name)}"]`);
+        } catch {
+          target = null;
+        }
+      }
+      if (!target || target.disabled || target.readOnly) {
+        skippedCount += 1;
+        continue;
+      }
+      const ok = setNativeControlValue(target, item.value);
+      if (ok) {
+        filledCount += 1;
+        const prevShadow = target.style.boxShadow;
+        const prevTransition = target.style.transition;
+        target.style.transition = 'box-shadow 0.25s ease';
+        target.style.boxShadow = '0 0 0 2px #0d9488';
+        setTimeout(() => {
+          target.style.boxShadow = prevShadow;
+          target.style.transition = prevTransition;
+        }, 1800);
+      } else {
+        skippedCount += 1;
+      }
+    }
+    return { ok: true, filledCount, skippedCount };
   }
 
   document.addEventListener(
@@ -355,6 +597,58 @@
       sendResponse({ ok: true });
       return false;
     }
+    if (msg.type === 'VERIPULSE_FAKE_GPS_UPDATED') {
+      broadcastFakeGpsToMain(msg.config || { enabled: false });
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (msg.type === 'VERIPULSE_SCAN_FORM_FIELDS') {
+      const fields = scanFormFieldsForAutofill();
+      sendResponse({
+        ok: true,
+        pageUrl: window.location.href,
+        pageTitle: document.title || window.location.pathname,
+        pageTextSample: (document.body?.innerText || '').trim().slice(0, 4500),
+        fields,
+      });
+      return false;
+    }
+    if (msg.type === 'VERIPULSE_AUTOFILL_FIELDS') {
+      const result = autofillWindowFields(msg.fields);
+      sendResponse(result);
+      return false;
+    }
+    if (msg.type === 'VERIPULSE_PROBE_GEO') {
+      const requestId = `vp_geo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('message', onGeoRes);
+        sendResponse({
+          ok: false,
+          error: 'Timed out waiting for page geolocation response.',
+        });
+      }, 6500);
+      function onGeoRes(ev) {
+        if (
+          ev.source !== window ||
+          !ev.data ||
+          ev.data.source !== 'VERIPULSE_PROBE_GEO_RES' ||
+          ev.data.requestId !== requestId
+        ) {
+          return;
+        }
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        window.removeEventListener('message', onGeoRes);
+        sendResponse(ev.data);
+      }
+      window.addEventListener('message', onGeoRes);
+      window.postMessage({ source: 'VERIPULSE_PROBE_GEO_REQ', requestId }, '*');
+      return true;
+    }
     return false;
   });
 
@@ -425,5 +719,40 @@
     if (document.body) {
       document.body.appendChild(badge);
     }
+  }
+
+  function updateFakeGpsBadge(cfg) {
+    const existing = document.getElementById('veripulse-gps-badge');
+    if (!cfg || !cfg.enabled || cfg.showFloatingBadge === false) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (!document.body) return;
+
+    const latStr = Number(cfg.latitude).toFixed(4);
+    const lngStr = Number(cfg.longitude).toFixed(4);
+    const labelStr = cfg.locationLabel ? `${cfg.locationLabel} · ` : '';
+
+    if (existing) {
+      const textEl = existing.querySelector('[data-vp-gps-text]');
+      if (textEl) {
+        textEl.textContent = `Fake GPS ON · ${labelStr}${latStr}, ${lngStr}`;
+      }
+      return;
+    }
+
+    const badge = document.createElement('div');
+    badge.id = 'veripulse-gps-badge';
+    badge.style.cssText =
+      'position:fixed;bottom:16px;left:16px;z-index:2147483645;display:flex;align-items:center;gap:8px;background:#0f172a;color:#f8fafc;border:1.5px solid #06b6d4;border-radius:10px;padding:6px 11px;font-size:11px;font-weight:700;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 8px 24px rgba(15,23,42,0.3);pointer-events:none;';
+    const dot = document.createElement('span');
+    dot.style.cssText =
+      'width:8px;height:8px;border-radius:9999px;background:#22d3ee;display:inline-block;flex-shrink:0;';
+    const label = document.createElement('span');
+    label.setAttribute('data-vp-gps-text', '1');
+    label.textContent = `Fake GPS ON · ${labelStr}${latStr}, ${lngStr}`;
+    badge.appendChild(dot);
+    badge.appendChild(label);
+    document.body.appendChild(badge);
   }
 })();

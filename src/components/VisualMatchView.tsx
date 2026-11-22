@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Bug,
   Camera,
   CheckCircle2,
   ClipboardPaste,
@@ -21,6 +22,7 @@ import {
 import { pickLang } from '../i18n/translations';
 import {
   AppLanguage,
+  BugReportItem,
   ProjectWorkspace,
   VisualCheckRecord,
 } from '../types/flowguard';
@@ -678,14 +680,57 @@ test('${checkName.replace(/'/g, "\\'")}', async ({ page }) => {
               </div>
             </div>
 
-            <a
-              href={diffResult.diffImageUrl}
-              download={`visual-diff-${Date.now()}.png`}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-50"
-            >
-              <Download className="w-3.5 h-3.5" />
-              {pickLang(lang, 'Download Diff PNG', 'ডিফ ইমেজ সেভ')}
-            </a>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const existingBugs = project.bugReports || [];
+                  const nextNum = existingBugs.length + 1;
+                  const now = new Date().toISOString();
+                  const newBug: BugReportItem = {
+                    id: `bug_vis_${Date.now()}`,
+                    bugKey: `BUG-${String(nextNum).padStart(2, '0')}`,
+                    title: `[Visual] ${checkName} (${diffResult.matchPct}% match vs ${passThresholdPct}% target)`,
+                    module: 'UI / Visual Layout',
+                    severity: didPass ? 'minor' : diffResult.matchPct < 75 ? 'critical' : 'major',
+                    priority: didPass ? 'P3' : 'P1',
+                    status: 'open',
+                    environment: project.activeEnvironment,
+                    browserInfo: `${diffResult.actualWidth}×${diffResult.actualHeight}px`,
+                    stepsToReproduce: `1. Open ${project.domain}\n2. Compare rendered UI screen (${diffResult.actualWidth}×${diffResult.actualHeight}) against Reference Design (${diffResult.refWidth}×${diffResult.refHeight})\n3. Inspect changed zones: ${diffResult.hotspots.join(', ') || 'See attached diff heatmap'}`,
+                    expectedResult: `Visual match >= ${passThresholdPct}% matching design reference.`,
+                    actualResult: `Visual match is ${diffResult.matchPct}% (${diffResult.mismatchedPixels.toLocaleString()} mismatched pixels · ${diffResult.diffPct}% difference).`,
+                    consoleOrApiNote: `Sensitivity threshold: ${sensitivity} | Zones: ${diffResult.hotspots.join(' | ') || 'Full frame'}`,
+                    screenshotDataUrl: diffResult.diffImageUrl,
+                    createdAt: now,
+                    updatedAt: now,
+                  };
+                  onUpdateProject({
+                    ...project,
+                    bugReports: [newBug, ...existingBugs],
+                  });
+                  onNotify?.(
+                    pickLang(
+                      lang,
+                      `Logged ${newBug.bugKey} to Bug & Test Studio!`,
+                      `${newBug.bugKey} সরাসরি বাগ ও টেস্ট স্টুডিওতে যোগ হয়েছে!`
+                    )
+                  );
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold cursor-pointer"
+              >
+                <Bug className="w-3.5 h-3.5" />
+                {pickLang(lang, 'Log Visual Bug', 'বাগ রিপোর্টে পাঠান')}
+              </button>
+              <a
+                href={diffResult.diffImageUrl}
+                download={`visual-diff-${Date.now()}.png`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-50"
+              >
+                <Download className="w-3.5 h-3.5" />
+                {pickLang(lang, 'Download Diff PNG', 'ডিফ ইমেজ সেভ')}
+              </a>
+            </div>
           </div>
 
           {/* 4-Mode Viewer Switcher */}

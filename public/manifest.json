@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "VeriPulse — SQA Studio & Extension",
   "short_name": "VeriPulse",
-  "version": "1.0.0",
-  "description": "Precision SQA companion Chrome Extension for recording user journeys, Python/Playwright codegen, role permissions, business rules, visual matching, bug reports, and test cases.",
+  "version": "1.1.0",
+  "description": "Precision SQA companion Chrome Extension with cloud account sync, live DOM recording, Playwright/pytest codegen, Fake GPS spoofing, business rules, visual matching, and bug reports.",
   "permissions": [
     "storage",
     "activeTab",
@@ -13,6 +13,10 @@
     "sidePanel",
     "alarms",
     "notifications"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -39,8 +43,15 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
+      "js": ["geo-spoof.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": ["http://*/*", "https://*/*"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ]
 }

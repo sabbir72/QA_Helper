@@ -8,6 +8,196 @@ const RECORDING_KEY = 'testally_recording_state';
 const INSPECTED_KEY = 'testally_last_inspected';
 const ALERTS_KEY = 'testally_self_alerts_v1';
 const FIRED_ALERT_KEY = 'testally_fired_alert_v1';
+const FAKE_GPS_KEY = 'veripulse_fake_gps_v1';
+const LAST_SCAN_KEY = 'testally_last_scan';
+const SYNC_CONN_KEY = 'veripulse_ext_sync_conn_v1';
+
+const DEFAULT_ZERO_WORKSPACE = {
+  version: 1,
+  activeProjectId: 'proj_default',
+  settings: {
+    theme: 'light',
+    screenshotConsentGranted: false,
+    maskSensitivePatterns: 'password|passwd|secret|token|auth|bearer|api_key|ssn|pin|cvv',
+  },
+  projects: [
+    {
+      id: 'proj_default',
+      name: 'My QA Workspace',
+      domain: 'app.example.com',
+      activeEnvironment: 'staging',
+      flows: [],
+      rbacRules: [],
+      customRoles: [],
+      customTestRules: [],
+      contentAssertions: [],
+      formulaChecks: [],
+      visualChecks: [],
+      stateTransitions: [],
+      dateTimeRules: [],
+      dataDependencies: [],
+      businessDocs: [],
+      businessNotes: [],
+      discussionPoints: [],
+      businessPolicies: [],
+      bugReports: [],
+      testCases: [],
+      notices: [],
+      approvalChain: [],
+      approvalSketches: [],
+      savedGpsLocations: [],
+    },
+  ],
+  recycleBin: [],
+};
+
+const DEFAULT_ZERO_GPS = {
+  enabled: false,
+  latitude: 23.8103,
+  longitude: 90.4125,
+  accuracy: 15,
+  altitude: 12,
+  heading: 0,
+  speed: 0,
+  locationLabel: 'Dhaka, Bangladesh',
+  simulateMovement: false,
+  routeEndLat: 23.8759,
+  routeEndLng: 90.3795,
+  routeIntervalSec: 3,
+  showFloatingBadge: true,
+  updatedAt: new Date(0).toISOString(),
+};
+
+const DEFAULT_ZERO_SCAN = {
+  ok: true,
+  pageUrl: '',
+  pageTitle: 'No page scanned yet',
+  elements: [],
+};
+
+let pushSyncTimer = null;
+
+function broadcastFakeGpsToTabs(cfg) {
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (tab.id && tab.url && /^https?:\/\//i.test(tab.url)) {
+        if (chrome.scripting && chrome.scripting.executeScript) {
+          chrome.scripting
+            .executeScript({
+              target: { tabId: tab.id },
+              files: ['geo-spoof.js'],
+              world: 'MAIN',
+            })
+            .catch(() => {});
+        }
+        chrome.tabs
+          .sendMessage(tab.id, {
+            type: 'VERIPULSE_FAKE_GPS_UPDATED',
+            config: cfg,
+          })
+          .catch(() => {});
+      }
+    }
+  });
+}
+
+async function applyUserBundleToExtensionStorage(bundle, syncConn) {
+  const ws = bundle.workspace || DEFAULT_ZERO_WORKSPACE;
+  const fakeGps = bundle.fakeGps || DEFAULT_ZERO_GPS;
+  const alerts = Array.isArray(bundle.alerts) ? bundle.alerts : [];
+  const rec = bundle.recording || { isRecording: false, recordedSteps: [] };
+  const lastScan = bundle.lastScan || DEFAULT_ZERO_SCAN;
+  const inspected = bundle.inspected || null;
+
+  return new Promise((resolve) => {
+    const payload = {
+      [STATE_KEY]: ws,
+      [FAKE_GPS_KEY]: fakeGps,
+      [ALERTS_KEY]: alerts,
+      [RECORDING_KEY]: rec,
+      [LAST_SCAN_KEY]: lastScan,
+      [INSPECTED_KEY]: inspected,
+      [FIRED_ALERT_KEY]: null,
+    };
+    if (syncConn !== undefined) {
+      payload[SYNC_CONN_KEY] = syncConn;
+    }
+    chrome.storage.local.set(payload, () => {
+      updateActionBadge(
+        Boolean(rec.isRecording),
+        (rec.recordedSteps || []).length,
+        false
+      );
+      broadcastFakeGpsToTabs(fakeGps);
+      resolve();
+    });
+  });
+}
+
+async function pushExtensionStateToCloud() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(
+      [
+        SYNC_CONN_KEY,
+        STATE_KEY,
+        FAKE_GPS_KEY,
+        ALERTS_KEY,
+        RECORDING_KEY,
+        LAST_SCAN_KEY,
+        INSPECTED_KEY,
+      ],
+      async (res) => {
+        const conn = res[SYNC_CONN_KEY];
+        if (!conn || !conn.serverUrl || !conn.bearerToken) {
+          resolve({ ok: false, error: 'Not connected to cloud account.' });
+          return;
+        }
+        const base = String(conn.serverUrl).replace(/\/+$/, '');
+        try {
+          const resp = await fetch(`${base}/api/workspace`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${conn.bearerToken}`,
+            },
+            body: JSON.stringify({
+              workspace: res[STATE_KEY] || DEFAULT_ZERO_WORKSPACE,
+              fakeGps: res[FAKE_GPS_KEY] || DEFAULT_ZERO_GPS,
+              alerts: Array.isArray(res[ALERTS_KEY]) ? res[ALERTS_KEY] : [],
+              recording: res[RECORDING_KEY] || { isRecording: false, recordedSteps: [] },
+              lastScan: res[LAST_SCAN_KEY] || DEFAULT_ZERO_SCAN,
+              inspected: res[INSPECTED_KEY] || null,
+            }),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok) {
+            resolve({ ok: false, error: data.error || `HTTP ${resp.status}` });
+            return;
+          }
+          const updatedConn = {
+            ...conn,
+            lastSyncedAt: data.updatedAt || new Date().toISOString(),
+          };
+          chrome.storage.local.set({ [SYNC_CONN_KEY]: updatedConn }, () => {
+            resolve({ ok: true, updatedAt: updatedConn.lastSyncedAt });
+          });
+        } catch (err) {
+          resolve({
+            ok: false,
+            error: err instanceof Error ? err.message : 'Network error',
+          });
+        }
+      }
+    );
+  });
+}
+
+function scheduleCloudSyncPush() {
+  if (pushSyncTimer) clearTimeout(pushSyncTimer);
+  pushSyncTimer = setTimeout(() => {
+    pushExtensionStateToCloud();
+  }, 600);
+}
 
 function updateActionBadge(isRecording, stepCount, hasAlert) {
   if (!chrome.action) return;
@@ -116,7 +306,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === 'TESTALLY_GET_STATUS') {
     chrome.storage.local.get(
-      [STATE_KEY, PREFS_KEY, RECORDING_KEY, INSPECTED_KEY, ALERTS_KEY, FIRED_ALERT_KEY],
+      [
+        STATE_KEY,
+        PREFS_KEY,
+        RECORDING_KEY,
+        INSPECTED_KEY,
+        ALERTS_KEY,
+        FIRED_ALERT_KEY,
+        FAKE_GPS_KEY,
+        SYNC_CONN_KEY,
+      ],
       (res) => {
         sendResponse({
           workspace: res[STATE_KEY] || null,
@@ -125,6 +324,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           inspected: res[INSPECTED_KEY] || null,
           alerts: Array.isArray(res[ALERTS_KEY]) ? res[ALERTS_KEY] : [],
           firedAlert: res[FIRED_ALERT_KEY] || null,
+          fakeGps: res[FAKE_GPS_KEY] || null,
+          syncConn: res[SYNC_CONN_KEY] || null,
         });
       }
     );
@@ -144,6 +345,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (chrome.alarms) {
           chrome.alarms.create(alert.id, { when: Number(alert.triggerAt) });
         }
+        scheduleCloudSyncPush();
         sendResponse({ ok: true, alerts: next });
       });
     });
@@ -169,6 +371,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             (rec.recordedSteps || []).length,
             Boolean(clearFired)
           );
+          scheduleCloudSyncPush();
           sendResponse({ ok: true, alerts: next });
         }
       );
@@ -228,6 +431,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             }
           }
         });
+        scheduleCloudSyncPush();
         sendResponse({ ok: true, recording: updated });
       });
     });
@@ -246,6 +450,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         { [RECORDING_KEY]: { ...current, recordedSteps: nextSteps } },
         () => {
           updateActionBadge(true, nextSteps.length, Boolean(res[FIRED_ALERT_KEY]));
+          scheduleCloudSyncPush();
           sendResponse({ ok: true, count: nextSteps.length });
         }
       );
@@ -264,6 +469,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             0,
             Boolean(res[FIRED_ALERT_KEY])
           );
+          scheduleCloudSyncPush();
           sendResponse({ ok: true });
         }
       );
@@ -273,6 +479,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === 'TESTALLY_ELEMENT_INSPECTED') {
     chrome.storage.local.set({ [INSPECTED_KEY]: message.element || null }, () => {
+      scheduleCloudSyncPush();
       sendResponse({ ok: true });
     });
     return true;
@@ -307,6 +514,119 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
       }
       sendResponse({ ok: true });
+    });
+    return true;
+  }
+
+  if (message.type === 'VERIPULSE_SET_FAKE_GPS') {
+    const cfg = message.config || { enabled: false };
+    chrome.storage.local.set({ [FAKE_GPS_KEY]: cfg }, () => {
+      broadcastFakeGpsToTabs(cfg);
+      scheduleCloudSyncPush();
+      sendResponse({ ok: true, fakeGps: cfg });
+    });
+    return true;
+  }
+
+  if (message.type === 'VERIPULSE_CONNECT_SYNC') {
+    const serverUrl = String(message.serverUrl || '').replace(/\/+$/, '');
+    const bearerToken = String(message.bearerToken || '').trim();
+    if (!serverUrl || !bearerToken) {
+      sendResponse({ ok: false, error: 'Missing server URL or sync token.' });
+      return false;
+    }
+    fetch(`${serverUrl}/api/workspace`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${bearerToken}`,
+      },
+    })
+      .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+      .then(async ({ ok, d }) => {
+        if (!ok || !d?.ok || !d?.user || !d?.bundle) {
+          sendResponse({
+            ok: false,
+            error: d?.error || 'Could not verify account token with web server.',
+          });
+          return;
+        }
+        const syncConn = {
+          user: d.user,
+          serverUrl,
+          bearerToken,
+          lastSyncedAt: d.bundle.updatedAt || new Date().toISOString(),
+        };
+        await applyUserBundleToExtensionStorage(d.bundle, syncConn);
+        sendResponse({ ok: true, user: d.user, syncConn });
+      })
+      .catch((err) => {
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : 'Unable to reach web server.',
+        });
+      });
+    return true;
+  }
+
+  if (message.type === 'VERIPULSE_PULL_SYNC') {
+    chrome.storage.local.get([SYNC_CONN_KEY], (res) => {
+      const conn = res[SYNC_CONN_KEY];
+      if (!conn || !conn.serverUrl || !conn.bearerToken) {
+        sendResponse({ ok: false, error: 'Extension is not connected to any account.' });
+        return;
+      }
+      const base = String(conn.serverUrl).replace(/\/+$/, '');
+      fetch(`${base}/api/workspace`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${conn.bearerToken}` },
+      })
+        .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+        .then(async ({ ok, d }) => {
+          if (!ok || !d?.ok || !d?.bundle) {
+            sendResponse({ ok: false, error: d?.error || 'Sync failed.' });
+            return;
+          }
+          const updatedConn = {
+            ...conn,
+            user: d.user || conn.user,
+            lastSyncedAt: d.bundle.updatedAt || new Date().toISOString(),
+          };
+          await applyUserBundleToExtensionStorage(d.bundle, updatedConn);
+          sendResponse({ ok: true, user: updatedConn.user, syncConn: updatedConn });
+        })
+        .catch((err) => {
+          sendResponse({
+            ok: false,
+            error: err instanceof Error ? err.message : 'Network error.',
+          });
+        });
+    });
+    return true;
+  }
+
+  if (message.type === 'VERIPULSE_PUSH_SYNC') {
+    pushExtensionStateToCloud().then((res) => sendResponse(res));
+    return true;
+  }
+
+  if (message.type === 'VERIPULSE_DISCONNECT_SYNC') {
+    if (chrome.alarms && chrome.alarms.clearAll) {
+      chrome.alarms.clearAll();
+    }
+    applyUserBundleToExtensionStorage(
+      {
+        workspace: DEFAULT_ZERO_WORKSPACE,
+        fakeGps: DEFAULT_ZERO_GPS,
+        alerts: [],
+        recording: { isRecording: false, recordedSteps: [] },
+        lastScan: DEFAULT_ZERO_SCAN,
+        inspected: null,
+      },
+      null
+    ).then(() => {
+      chrome.storage.local.remove([SYNC_CONN_KEY], () => {
+        sendResponse({ ok: true });
+      });
     });
     return true;
   }

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -9,13 +9,18 @@ import {
   Eraser,
   GitBranch,
   Image as ImageIcon,
+  LayoutGrid,
   Link2,
   Megaphone,
   MousePointer2,
+  Pause,
   PenTool,
   Pin,
+  Play,
   Plus,
+  RotateCcw,
   ShieldAlert,
+  Sparkles,
   Square,
   Trash2,
   Undo2,
@@ -87,6 +92,10 @@ export const FlowchartStudioView: React.FC<FlowchartStudioViewProps> = ({
     project.flows[0]?.id || ''
   );
   const [showMermaid, setShowMermaid] = useState(false);
+
+  // Interactive Flow Trace Runner
+  const [traceIndex, setTraceIndex] = useState<number>(-1);
+  const [tracePlaying, setTracePlaying] = useState<boolean>(false);
 
   // Notice composer state
   const [noticeType, setNoticeType] = useState<QaNoticeType>('allowed');
@@ -220,6 +229,8 @@ export const FlowchartStudioView: React.FC<FlowchartStudioViewProps> = ({
     setNodes(cols);
     setEdges(builtEdges);
     setSelectedNodeId(cols[0]?.id || null);
+    setTraceIndex(-1);
+    setTracePlaying(false);
     onNotify?.(
       pickLang(
         lang,
@@ -228,6 +239,103 @@ export const FlowchartStudioView: React.FC<FlowchartStudioViewProps> = ({
       )
     );
   };
+
+  useEffect(() => {
+    if (!tracePlaying || nodes.length === 0) return;
+    const timer = window.setInterval(() => {
+      setTraceIndex((prev) => {
+        if (prev + 1 >= nodes.length) {
+          setTracePlaying(false);
+          return nodes.length - 1;
+        }
+        return prev + 1;
+      });
+    }, 950);
+    return () => window.clearInterval(timer);
+  }, [tracePlaying, nodes.length]);
+
+  const handleLoadTemplate = (templateId: 'auth' | 'checkout' | 'approval') => {
+    const t = Date.now();
+    let tplNodes: FlowchartNode[] = [];
+    let tplEdges: FlowchartEdge[] = [];
+
+    if (templateId === 'auth') {
+      tplNodes = [
+        { id: `tpl_1_${t}`, kind: 'start', label: 'User Login', x: 105, y: 195 },
+        { id: `tpl_2_${t}`, kind: 'step', label: 'Submit Credentials', x: 285, y: 195 },
+        { id: `tpl_3_${t}`, kind: 'decision', label: 'OTP & Token Valid?', x: 475, y: 195 },
+        { id: `tpl_4_${t}`, kind: 'allowed', label: 'Dashboard Access', x: 705, y: 115 },
+        { id: `tpl_5_${t}`, kind: 'blocked', label: 'Lock After 5 Tries', x: 705, y: 275 },
+      ];
+      tplEdges = [
+        { id: `te_1_${t}`, from: tplNodes[0].id, to: tplNodes[1].id, label: 'POST /login', tone: 'flow' },
+        { id: `te_2_${t}`, from: tplNodes[1].id, to: tplNodes[2].id, label: 'Verify', tone: 'flow' },
+        { id: `te_3_${t}`, from: tplNodes[2].id, to: tplNodes[3].id, label: 'Valid', tone: 'allowed' },
+        { id: `te_4_${t}`, from: tplNodes[2].id, to: tplNodes[4].id, label: 'Invalid', tone: 'blocked' },
+      ];
+    } else if (templateId === 'checkout') {
+      tplNodes = [
+        { id: `tpl_1_${t}`, kind: 'start', label: 'Cart Ready', x: 105, y: 195 },
+        { id: `tpl_2_${t}`, kind: 'step', label: 'Apply Promo + Tax', x: 285, y: 195 },
+        { id: `tpl_3_${t}`, kind: 'decision', label: 'Payment Charged?', x: 475, y: 195 },
+        { id: `tpl_4_${t}`, kind: 'allowed', label: 'Order Confirmed', x: 705, y: 115 },
+        { id: `tpl_5_${t}`, kind: 'blocked', label: 'Retry / Rollback', x: 705, y: 275 },
+      ];
+      tplEdges = [
+        { id: `te_1_${t}`, from: tplNodes[0].id, to: tplNodes[1].id, label: 'Calculate', tone: 'flow' },
+        { id: `te_2_${t}`, from: tplNodes[1].id, to: tplNodes[2].id, label: 'Pay Now', tone: 'flow' },
+        { id: `te_3_${t}`, from: tplNodes[2].id, to: tplNodes[3].id, label: '200 OK', tone: 'allowed' },
+        { id: `te_4_${t}`, from: tplNodes[2].id, to: tplNodes[4].id, label: '402 Fail', tone: 'blocked' },
+      ];
+    } else {
+      tplNodes = [
+        { id: `tpl_1_${t}`, kind: 'start', label: 'Draft Request', x: 105, y: 195 },
+        { id: `tpl_2_${t}`, kind: 'step', label: 'Manager Review', x: 285, y: 195 },
+        { id: `tpl_3_${t}`, kind: 'decision', label: 'Amount <= Quota?', x: 475, y: 195 },
+        { id: `tpl_4_${t}`, kind: 'allowed', label: 'Approved & Paid', x: 705, y: 115 },
+        { id: `tpl_5_${t}`, kind: 'blocked', label: 'Escalate Finance', x: 705, y: 275 },
+      ];
+      tplEdges = [
+        { id: `te_1_${t}`, from: tplNodes[0].id, to: tplNodes[1].id, label: 'Submit', tone: 'flow' },
+        { id: `te_2_${t}`, from: tplNodes[1].id, to: tplNodes[2].id, label: 'Check Limit', tone: 'flow' },
+        { id: `te_3_${t}`, from: tplNodes[2].id, to: tplNodes[3].id, label: 'Within Cap', tone: 'allowed' },
+        { id: `te_4_${t}`, from: tplNodes[2].id, to: tplNodes[4].id, label: 'Exceeded', tone: 'blocked' },
+      ];
+    }
+
+    setNodes(tplNodes);
+    setEdges(tplEdges);
+    setSelectedNodeId(tplNodes[0].id);
+    setTraceIndex(0);
+    setTracePlaying(false);
+    onNotify?.(
+      pickLang(
+        lang,
+        'Loaded interactive flowchart blueprint.',
+        'ফ্লোচার্ট টেমপ্লেট লোড করা হয়েছে।'
+      )
+    );
+  };
+
+  const handleAutoTidyLayout = () => {
+    if (nodes.length === 0) return;
+    const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(nodes.length))));
+    const gapX = cols > 1 ? 660 / (cols - 1) : 0;
+    setNodes((prev) =>
+      prev.map((n, idx) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        return {
+          ...n,
+          x: Math.round(120 + col * gapX),
+          y: Math.round(110 + row * 125),
+        };
+      })
+    );
+    onNotify?.(pickLang(lang, 'Auto-aligned nodes cleanly.', 'সব বক্স সুন্দরভাবে সাজানো হয়েছে।'));
+  };
+
+  const tracedNode = traceIndex >= 0 && traceIndex < nodes.length ? nodes[traceIndex] : null;
 
   const handleAddNode = (kind: FlowchartNodeKind, customLabel?: string) => {
     const defaultLabels: Record<FlowchartNodeKind, string> = {
@@ -697,9 +805,81 @@ export const FlowchartStudioView: React.FC<FlowchartStudioViewProps> = ({
                 <GitBranch className="w-3.5 h-3.5" />
                 {pickLang(lang, 'Rules → Flowchart', 'রুলস থেকে ফ্লোচার্ট')}
               </button>
+
+              <span className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5" />
+
+              <button
+                type="button"
+                onClick={() => handleLoadTemplate('auth')}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-400 cursor-pointer"
+              >
+                <Sparkles className="w-3 h-3 text-indigo-500" />
+                Auth
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLoadTemplate('checkout')}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-400 cursor-pointer"
+              >
+                Checkout
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLoadTemplate('approval')}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-400 cursor-pointer"
+              >
+                Approval
+              </button>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={nodes.length === 0}
+                onClick={() => {
+                  if (tracePlaying) {
+                    setTracePlaying(false);
+                  } else {
+                    if (traceIndex < 0 || traceIndex >= nodes.length - 1) {
+                      setTraceIndex(0);
+                    }
+                    setTracePlaying(true);
+                  }
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-45 ${
+                  tracePlaying
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
+              >
+                {tracePlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                {tracePlaying
+                  ? pickLang(lang, 'Pause Trace', 'বিরতি')
+                  : pickLang(lang, 'Trace Flow', 'ফ্লো চালান')}
+              </button>
+              {traceIndex >= 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTracePlaying(false);
+                    setTraceIndex(-1);
+                  }}
+                  title={pickLang(lang, 'Reset Trace', 'ট্রেস রিসেট')}
+                  className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={nodes.length === 0}
+                onClick={handleAutoTidyLayout}
+                title={pickLang(lang, 'Auto-tidy grid layout', 'বক্সগুলো সুন্দরভাবে সাজান')}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-45 cursor-pointer"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                {pickLang(lang, 'Tidy', 'সাজান')}
+              </button>
               <button
                 type="button"
                 onClick={() => setShowMermaid((v) => !v)}
@@ -726,6 +906,32 @@ export const FlowchartStudioView: React.FC<FlowchartStudioViewProps> = ({
               </button>
             </div>
           </div>
+
+          {tracedNode && (
+            <div className="rounded-lg border border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/70 dark:bg-emerald-950/30 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                  [{traceIndex + 1}/{nodes.length}]
+                </span>
+                <span className="font-semibold text-slate-900 dark:text-slate-100">
+                  {tracedNode.label}
+                </span>
+                <span className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800 font-mono text-[10px] uppercase text-emerald-700 dark:text-emerald-300">
+                  {tracedNode.kind}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={traceIndex >= nodes.length - 1}
+                  onClick={() => setTraceIndex((i) => Math.min(nodes.length - 1, i + 1))}
+                  className="px-2.5 py-1 rounded border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 disabled:opacity-40 cursor-pointer"
+                >
+                  {pickLang(lang, 'Next Step →', 'পরবর্তী ধাপ →')}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Drawing & Node Creation Toolbar */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-xs flex flex-wrap items-center justify-between gap-3">
@@ -1067,6 +1273,7 @@ export const FlowchartStudioView: React.FC<FlowchartStudioViewProps> = ({
                   const style = getNodeStyle(node.kind);
                   const isSel = selectedNodeId === node.id;
                   const isSrc = connectSourceId === node.id;
+                  const isTraced = tracedNode?.id === node.id;
                   return (
                     <g
                       key={node.id}
@@ -1074,12 +1281,25 @@ export const FlowchartStudioView: React.FC<FlowchartStudioViewProps> = ({
                       onMouseDown={(e) => handleNodeMouseDown(e, node)}
                       className="cursor-grab active:cursor-grabbing"
                     >
+                      {isTraced && (
+                        <rect
+                          x={-75}
+                          y={-30}
+                          width={150}
+                          height={60}
+                          rx={node.kind === 'start' ? 28 : 13}
+                          fill="none"
+                          stroke="#10b981"
+                          strokeWidth={3}
+                          strokeDasharray="6 3"
+                        />
+                      )}
                       {node.kind === 'decision' ? (
                         <polygon
                           points="0,-32 68,0 0,32 -68,0"
                           fill={style.fill}
-                          stroke={isSel || isSrc ? '#0f172a' : style.stroke}
-                          strokeWidth={isSel || isSrc ? 3 : 2}
+                          stroke={isTraced ? '#10b981' : isSel || isSrc ? '#0f172a' : style.stroke}
+                          strokeWidth={isTraced || isSel || isSrc ? 3 : 2}
                         />
                       ) : (
                         <rect
@@ -1089,8 +1309,8 @@ export const FlowchartStudioView: React.FC<FlowchartStudioViewProps> = ({
                           height={44}
                           rx={node.kind === 'start' ? 22 : 9}
                           fill={style.fill}
-                          stroke={isSel || isSrc ? '#0f172a' : style.stroke}
-                          strokeWidth={isSel || isSrc ? 3 : 2}
+                          stroke={isTraced ? '#10b981' : isSel || isSrc ? '#0f172a' : style.stroke}
+                          strokeWidth={isTraced || isSel || isSrc ? 3 : 2}
                         />
                       )}
                       <text

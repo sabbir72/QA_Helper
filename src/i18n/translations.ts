@@ -41,6 +41,8 @@ export const UI_COPY = {
     coverage: { en: 'UI Coverage', bn: 'UI কভারেজ' },
     diagram: { en: 'Flowchart & Notices', bn: 'ফ্লোচার্ট ও নোটিশ' },
     alerts: { en: 'Self Alerts', bn: 'সেলফ অ্যালার্ট' },
+    fakeGps: { en: 'Fake GPS', bn: 'ফেইক জিপিএস' },
+    smartScan: { en: 'AI Screen & Site QA', bn: 'স্ক্রিন অটো-ফিল ও QA' },
     recycleBin: { en: 'Recycle Bin', bn: 'রিসাইকেল বিন' },
     guide: { en: 'All Guidelines', bn: 'সকল গাইডলাইন' },
     extension: { en: 'Chrome Extension', bn: 'ক্রোম এক্সটেনশন' },

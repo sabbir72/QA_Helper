@@ -20,6 +20,7 @@ import {
   RecordedStep,
   RecycleBinCategory,
   RecycleBinItem,
+  SavedGpsLocation,
   SelfAlert,
   StateTransitionRule,
   VisualCheckRecord,
@@ -118,6 +119,7 @@ export function getCategoryLabel(
     qa_notice: { en: 'QA Notice', bn: 'QA নোটিশ' },
     self_alert: { en: 'Self Alert', bn: 'সেলফ অ্যালার্ট' },
     recorded_steps: { en: 'Recorded Steps', bn: 'রেকর্ড করা স্টেপস' },
+    fake_gps_profile: { en: 'Fake GPS Profile', bn: 'ফেইক জিপিএস প্রোফাইল' },
     workspace_snapshot: { en: 'Workspace Backup', bn: 'ওয়ার্কস্পেস ব্যাকআপ' },
   };
   const entry = labels[category];
@@ -486,6 +488,23 @@ export function detectProjectDeletions(
     );
   }
 
+  // 13. Saved Fake GPS Profiles
+  for (const gps of findRemovedById(
+    prev.savedGpsLocations,
+    next.savedGpsLocations
+  )) {
+    items.push(
+      createRecycleBinItem({
+        category: 'fake_gps_profile',
+        projectId,
+        projectName,
+        title: gps.name,
+        subtitle: `${gps.latitude.toFixed(5)}, ${gps.longitude.toFixed(5)}`,
+        payload: gps,
+      })
+    );
+  }
+
   if (items.length === 0) {
     return { items: [], summaryTitle: '', categoryLabel: '' };
   }
@@ -777,6 +796,15 @@ export function restoreFromRecycleBin(
         return {
           ...proj,
           notices: dedupePush(proj.notices, item.payload as QaNotice, true),
+        };
+      case 'fake_gps_profile':
+        return {
+          ...proj,
+          savedGpsLocations: dedupePush(
+            proj.savedGpsLocations,
+            item.payload as SavedGpsLocation,
+            true
+          ),
         };
       default:
         return proj;

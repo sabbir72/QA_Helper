@@ -298,6 +298,18 @@
       <div id="fired-alert-msg" class="alert-banner-msg"></div>
     </div>
 
+    <!-- Active User & Cloud Sync Strip -->
+    <div class="card" style="padding:9px 12px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+      <div style="min-width:0;">
+        <div id="sync-user-label" style="font-size:11px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Zero-Data Local Mode</div>
+        <div id="sync-sub-label" class="label" style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Sign in to sync with Web App</div>
+      </div>
+      <div style="display:flex;gap:6px;shrink:0;">
+        <button id="sync-now-btn" class="icon-btn" type="button" style="display:none;">Sync</button>
+        <button id="connect-account-btn" class="icon-btn" type="button">Sign In</button>
+      </div>
+    </div>
+
     <div class="card">
       <div class="row">
         <span class="label">Current Page</span>
@@ -333,11 +345,34 @@
       </div>
     </div>
 
+    <!-- Quick Fake GPS Card inside Popup -->
+    <div class="card" style="padding:10px 12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <span id="gps-card-title" style="font-size:11px;font-weight:700;">Fake GPS Spoofer</span>
+        <button id="open-gps-btn" class="link-btn" type="button" style="font-size:10px;">GPS Studio →</button>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span id="gps-coords-label" class="label mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">OFF · Real Location</span>
+        <button id="toggle-gps-btn" class="icon-btn" type="button" style="white-space:nowrap;">
+          Enable GPS
+        </button>
+      </div>
+    </div>
+
     <button id="toggle-rec-btn" class="btn" type="button">Start Recording Steps</button>
 
     <div class="grid-2">
       <button id="inspect-el-btn" class="btn" type="button" style="margin-bottom:0;">Pick Element</button>
       <button id="scan-cov-btn" class="btn" type="button" style="margin-bottom:0;">Scan Controls</button>
+    </div>
+
+    <div class="grid-2" style="margin-top:8px;">
+      <button id="autofill-screen-btn" class="btn" type="button" style="margin-bottom:0;border-color:#0d9488;color:#0d9488;">
+        Auto-Fill Fields
+      </button>
+      <button id="smart-site-qa-btn" class="btn" type="button" style="margin-bottom:0;border-color:#2563eb;color:#2563eb;">
+        Site Test Plan
+      </button>
     </div>
 
     <div class="grid-2" style="margin-top:8px; margin-bottom:0;">

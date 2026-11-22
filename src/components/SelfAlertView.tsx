@@ -9,6 +9,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Search,
   Timer,
   Trash2,
   Volume2,
@@ -61,6 +62,7 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
   const [title, setTitle] = useState<string>('');
   const [message, setMessage] = useState<string>('');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [alertQuery, setAlertQuery] = useState<string>('');
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [notifPerm, setNotifPerm] = useState<NotificationPermission>(() => {
     if (typeof Notification !== 'undefined') {
@@ -74,21 +76,31 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  const scheduledAlerts = useMemo(
-    () =>
-      alerts
-        .filter((a) => a.status === 'scheduled')
-        .sort((a, b) => a.triggerAt - b.triggerAt),
-    [alerts]
-  );
+  const scheduledAlerts = useMemo(() => {
+    const q = alertQuery.trim().toLowerCase();
+    return alerts
+      .filter((a) => a.status === 'scheduled')
+      .filter(
+        (a) =>
+          !q ||
+          a.title.toLowerCase().includes(q) ||
+          a.message.toLowerCase().includes(q)
+      )
+      .sort((a, b) => a.triggerAt - b.triggerAt);
+  }, [alerts, alertQuery]);
 
-  const triggeredAlerts = useMemo(
-    () =>
-      alerts
-        .filter((a) => a.status === 'triggered')
-        .sort((a, b) => b.triggerAt - a.triggerAt),
-    [alerts]
-  );
+  const triggeredAlerts = useMemo(() => {
+    const q = alertQuery.trim().toLowerCase();
+    return alerts
+      .filter((a) => a.status === 'triggered')
+      .filter(
+        (a) =>
+          !q ||
+          a.title.toLowerCase().includes(q) ||
+          a.message.toLowerCase().includes(q)
+      )
+      .sort((a, b) => b.triggerAt - a.triggerAt);
+  }, [alerts, alertQuery]);
 
   const handleRequestPermission = async () => {
     if (typeof Notification === 'undefined') {
@@ -130,6 +142,25 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
     setMode('timer');
     setMinutes(mins);
     setSeconds(secs);
+  };
+
+  const applyRoutinePreset = (
+    mins: number,
+    presetTitle: string,
+    presetMessage: string
+  ) => {
+    setMode('timer');
+    setMinutes(mins);
+    setSeconds(0);
+    setTitle(presetTitle);
+    setMessage(presetMessage);
+    onNotify(
+      pickLang(
+        lang,
+        `Loaded "${presetTitle}" (${mins}m). Click Schedule Self Alert to start.`,
+        `"${presetTitle}" (${mins} মি.) লোড হয়েছে — সেট করুন বাটনে চাপ দিন।`
+      )
+    );
   };
 
   const handleCreateAlert = (e: React.FormEvent) => {
@@ -307,6 +338,59 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
               <AlarmClock className="w-4 h-4 text-orange-600 dark:text-orange-400" />
               {pickLang(lang, 'Create New Self Alert', 'নতুন সেলফ অ্যালার্ট সেট করুন')}
             </h3>
+          </div>
+
+          {/* 1-Click SQA Routine Templates */}
+          <div className="space-y-1.5">
+            <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              {pickLang(lang, 'SQA Routine Presets', 'SQA রুটিন টেমপ্লেট')}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                {
+                  mins: 15,
+                  labelEn: '15m Smoke Check',
+                  labelBn: '১৫মি স্মোক চেক',
+                  title: pickLang(lang, 'Smoke Check Reminder', 'স্মোক চেক রিমাইন্ডার'),
+                  msg: pickLang(
+                    lang,
+                    'Run post-deploy smoke checks across Login, Dashboard & Checkout.',
+                    'ডিপ্লয়ের পর লগইন, ড্যাশবোর্ড ও চেকআউট স্মোক টেস্ট যাচাই করুন।'
+                  ),
+                },
+                {
+                  mins: 30,
+                  labelEn: '30m Build Watch',
+                  labelBn: '৩০মি বিল্ড ওয়াচ',
+                  title: pickLang(lang, 'Staging Build Verification', 'স্টেজিং বিল্ড যাচাই'),
+                  msg: pickLang(
+                    lang,
+                    'Check CI/CD pipeline & re-verify fixed bug tickets on staging.',
+                    'স্টেজিং বিল্ড আপডেট হয়েছে কিনা দেখে ফিক্স হওয়া বাগগুলো রি-টেস্ট করুন।'
+                  ),
+                },
+                {
+                  mins: 45,
+                  labelEn: '45m Regression',
+                  labelBn: '৪৫মি রিগ্রেশন',
+                  title: pickLang(lang, 'Regression Sign-off', 'রিগ্রেশন সাইন-অফ'),
+                  msg: pickLang(
+                    lang,
+                    'Review open blocker bugs, export CSV, and share QA sign-off report.',
+                    'ওপেন ব্লকার বাগ রিভিউ করে QA সাইন-অফ রিপোর্ট শেয়ার করুন।'
+                  ),
+                },
+              ].map((tpl) => (
+                <button
+                  key={tpl.labelEn}
+                  type="button"
+                  onClick={() => applyRoutinePreset(tpl.mins, tpl.title, tpl.msg)}
+                  className="px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-[11px] font-semibold text-slate-700 dark:text-slate-300 hover:border-orange-400 hover:text-orange-700 dark:hover:text-orange-300 cursor-pointer"
+                >
+                  {pickLang(lang, tpl.labelEn, tpl.labelBn)}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Mode Selector */}
@@ -510,6 +594,19 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
 
         {/* Right: Active Countdown Timers & Triggered History */}
         <div className="lg:col-span-7 space-y-5">
+          {alerts.length > 0 && (
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={alertQuery}
+                onChange={(e) => setAlertQuery(e.target.value)}
+                placeholder={pickLang(lang, 'Filter active & past alerts...', 'অ্যালার্ট খুঁজুন...')}
+                className="w-full pl-8 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100"
+              />
+            </div>
+          )}
+
           {/* Active Timers */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-3">
             <div className="flex items-center justify-between">

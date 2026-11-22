@@ -6,6 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const toggleBtn = document.getElementById('toggle-rec-btn');
   const inspectBtn = document.getElementById('inspect-el-btn');
   const scanBtn = document.getElementById('scan-cov-btn');
+  const autoFillBtn = document.getElementById('autofill-screen-btn');
+  const smartSiteQaBtn = document.getElementById('smart-site-qa-btn');
   const openDashBtn = document.getElementById('open-dash-btn');
   const openSidePanelBtn = document.getElementById('open-sidepanel-btn');
   const openSettingsBtn = document.getElementById('open-settings-btn');
@@ -26,9 +28,36 @@ document.addEventListener('DOMContentLoaded', () => {
   const alertMinsLabel = document.getElementById('alert-mins-label');
   const setAlertBtn = document.getElementById('set-alert-btn');
 
+  const gpsCardTitle = document.getElementById('gps-card-title');
+  const openGpsBtn = document.getElementById('open-gps-btn');
+  const gpsCoordsLabel = document.getElementById('gps-coords-label');
+  const toggleGpsBtn = document.getElementById('toggle-gps-btn');
+
+  const syncUserLabel = document.getElementById('sync-user-label');
+  const syncSubLabel = document.getElementById('sync-sub-label');
+  const syncNowBtn = document.getElementById('sync-now-btn');
+  const connectAccountBtn = document.getElementById('connect-account-btn');
+
   let isRecording = false;
   let currentTheme = 'light';
   let currentLang = 'en';
+  let activeSyncConn = null;
+  let fakeGpsState = {
+    enabled: false,
+    latitude: 23.8103,
+    longitude: 90.4125,
+    accuracy: 15,
+    altitude: 12,
+    heading: 0,
+    speed: 0,
+    locationLabel: 'Dhaka, Bangladesh',
+    simulateMovement: false,
+    routeEndLat: 23.8759,
+    routeEndLng: 90.3795,
+    routeIntervalSec: 3,
+    showFloatingBadge: true,
+    updatedAt: new Date(0).toISOString(),
+  };
 
   try {
     currentLang = localStorage.getItem('testally_lang') === 'bn' ? 'bn' : 'en';
@@ -92,6 +121,14 @@ document.addEventListener('DOMContentLoaded', () => {
       currentLang === 'bn' ? 'এলিমেন্ট পিকার' : 'Pick Element';
     scanBtn.textContent =
       currentLang === 'bn' ? 'কন্ট্রোল স্ক্যান' : 'Scan Controls';
+    if (autoFillBtn) {
+      autoFillBtn.textContent =
+        currentLang === 'bn' ? 'স্ক্রিন অটো-ফিল' : 'Auto-Fill Fields';
+    }
+    if (smartSiteQaBtn) {
+      smartSiteQaBtn.textContent =
+        currentLang === 'bn' ? 'সাইট টেস্ট প্ল্যান' : 'Site Test Plan';
+    }
     openDashBtn.textContent =
       currentLang === 'bn' ? 'ওয়ার্কস্পেস খুলুন' : 'Open Workspace';
     if (openSidePanelBtn) {
@@ -100,8 +137,62 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     openSettingsBtn.textContent =
       currentLang === 'bn' ? 'এক্সটেনশন সেটিংস' : 'Extension Settings';
+    if (gpsCardTitle) {
+      gpsCardTitle.textContent =
+        currentLang === 'bn' ? 'ফেইক জিপিএস স্পুফার' : 'Fake GPS Spoofer';
+    }
+    if (openGpsBtn) {
+      openGpsBtn.textContent =
+        currentLang === 'bn' ? 'জিপিএস স্টুডিও →' : 'GPS Studio →';
+    }
     applyTheme(currentTheme);
     renderRecordingButton();
+    renderFakeGps();
+    renderSyncState();
+  }
+
+  function renderSyncState() {
+    if (!syncUserLabel || !syncSubLabel || !syncNowBtn || !connectAccountBtn) return;
+    if (activeSyncConn && activeSyncConn.user && activeSyncConn.user.email) {
+      syncUserLabel.textContent = activeSyncConn.user.name || activeSyncConn.user.email;
+      syncSubLabel.textContent = activeSyncConn.user.email;
+      syncSubLabel.style.color = '#0d9488';
+      syncNowBtn.style.display = 'inline-block';
+      syncNowBtn.textContent = currentLang === 'bn' ? 'সিঙ্ক' : 'Sync';
+      connectAccountBtn.textContent = currentLang === 'bn' ? 'অ্যাকাউন্ট' : 'Account';
+    } else {
+      syncUserLabel.textContent =
+        currentLang === 'bn' ? 'জিরো-ডাটা লোকাল মোড' : 'Zero-Data Local Mode';
+      syncSubLabel.textContent =
+        currentLang === 'bn' ? 'ওয়েবের সাথে সিঙ্ক করতে সাইন ইন করুন' : 'Sign in to sync with Web App';
+      syncSubLabel.style.color = '';
+      syncNowBtn.style.display = 'none';
+      connectAccountBtn.textContent = currentLang === 'bn' ? 'সাইন ইন' : 'Sign In';
+    }
+  }
+
+  function renderFakeGps() {
+    if (!gpsCoordsLabel || !toggleGpsBtn) return;
+    if (fakeGpsState && fakeGpsState.enabled) {
+      const lat = Number(fakeGpsState.latitude || 0).toFixed(4);
+      const lng = Number(fakeGpsState.longitude || 0).toFixed(4);
+      gpsCoordsLabel.textContent = `ON · ${lat}, ${lng}`;
+      gpsCoordsLabel.style.color = '#0d9488';
+      toggleGpsBtn.textContent =
+        currentLang === 'bn' ? 'বন্ধ করুন' : 'Turn OFF';
+      toggleGpsBtn.style.background = '#0d9488';
+      toggleGpsBtn.style.color = '#ffffff';
+      toggleGpsBtn.style.borderColor = '#0d9488';
+    } else {
+      gpsCoordsLabel.textContent =
+        currentLang === 'bn' ? 'বন্ধ · আসল লোকেশন' : 'OFF · Real Location';
+      gpsCoordsLabel.style.color = '';
+      toggleGpsBtn.textContent =
+        currentLang === 'bn' ? 'চালু করুন' : 'Enable GPS';
+      toggleGpsBtn.style.background = '';
+      toggleGpsBtn.style.color = '';
+      toggleGpsBtn.style.borderColor = '';
+    }
   }
 
   function renderRecordingButton() {
@@ -197,8 +288,100 @@ document.addEventListener('DOMContentLoaded', () => {
       recCountEl.textContent = String((res.recording.recordedSteps || []).length);
       renderRecordingButton();
     }
+    if (res.fakeGps) {
+      fakeGpsState = { ...fakeGpsState, ...res.fakeGps };
+      renderFakeGps();
+    }
+    if (res.syncConn) {
+      activeSyncConn = res.syncConn;
+      renderSyncState();
+      // Pull latest isolated cloud bundle on popup open
+      chrome.runtime.sendMessage({ type: 'VERIPULSE_PULL_SYNC' }, (pullRes) => {
+        if (!pullRes?.ok) return;
+        chrome.runtime.sendMessage({ type: 'TESTALLY_GET_STATUS' }, (fresh) => {
+          if (!fresh) return;
+          if (fresh.fakeGps) {
+            fakeGpsState = { ...fakeGpsState, ...fresh.fakeGps };
+            renderFakeGps();
+          }
+          if (fresh.recording) {
+            isRecording = Boolean(fresh.recording.isRecording);
+            recCountEl.textContent = String((fresh.recording.recordedSteps || []).length);
+            renderRecordingButton();
+          }
+          if (fresh.workspace && Array.isArray(fresh.workspace.projects)) {
+            const active =
+              fresh.workspace.projects.find(
+                (p) => p.id === fresh.workspace.activeProjectId
+              ) || fresh.workspace.projects[0];
+            if (active) {
+              projNameEl.textContent = active.name;
+              projEnvEl.textContent = active.activeEnvironment;
+            }
+          }
+        });
+      });
+    } else {
+      renderSyncState();
+    }
     renderFiredAlert(res.firedAlert || null);
   });
+
+  if (syncNowBtn) {
+    syncNowBtn.addEventListener('click', () => {
+      syncNowBtn.textContent = '...';
+      chrome.runtime.sendMessage({ type: 'VERIPULSE_PULL_SYNC' }, (res) => {
+        syncNowBtn.textContent = currentLang === 'bn' ? 'সিঙ্ক' : 'Sync';
+        statusMsg.textContent = res?.ok
+          ? currentLang === 'bn'
+            ? 'ক্লাউড ওয়ার্কস্পেস সিঙ্ক সম্পন্ন!'
+            : 'Synced cleanly with your Web App account.'
+          : res?.error || 'Sync failed.';
+      });
+    });
+  }
+
+  if (connectAccountBtn) {
+    connectAccountBtn.addEventListener('click', () => {
+      chrome.runtime.sendMessage({
+        type: 'TESTALLY_OPEN_DASHBOARD',
+        section: 'extension',
+      });
+    });
+  }
+
+  if (toggleGpsBtn) {
+    toggleGpsBtn.addEventListener('click', () => {
+      const next = {
+        ...fakeGpsState,
+        enabled: !fakeGpsState.enabled,
+        updatedAt: new Date().toISOString(),
+      };
+      fakeGpsState = next;
+      renderFakeGps();
+      chrome.runtime.sendMessage(
+        { type: 'VERIPULSE_SET_FAKE_GPS', config: next },
+        () => {
+          statusMsg.textContent = next.enabled
+            ? currentLang === 'bn'
+              ? `ফেইক জিপিএস চালু! (${Number(next.latitude).toFixed(4)}, ${Number(next.longitude).toFixed(4)})`
+              : `Fake GPS enabled at ${Number(next.latitude).toFixed(4)}, ${Number(next.longitude).toFixed(4)}.`
+            : currentLang === 'bn'
+              ? 'ফেইক জিপিএস বন্ধ করা হয়েছে — আসল লোকেশন সক্রিয়।'
+              : 'Fake GPS disabled — real browser geolocation restored.';
+        }
+      );
+    });
+  }
+
+  if (openGpsBtn) {
+    openGpsBtn.addEventListener('click', () => {
+      chrome.runtime.sendMessage({
+        type: 'TESTALLY_OPEN_DASHBOARD',
+        section: 'fakeGps',
+      });
+    });
+  }
 
   if (dismissAlertBtn) {
     dismissAlertBtn.addEventListener('click', () => {
@@ -333,6 +516,96 @@ document.addEventListener('DOMContentLoaded', () => {
       );
     });
   });
+
+  if (autoFillBtn) {
+    autoFillBtn.addEventListener('click', () => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tabId = tabs[0]?.id;
+        if (!tabId) return;
+        statusMsg.textContent =
+          currentLang === 'bn'
+            ? 'স্ক্রিনের ডাটা ফিল্ড স্ক্যান করা হচ্ছে...'
+            : 'Scanning window data fields...';
+        ensureContentScriptAndSend(
+          tabId,
+          { type: 'VERIPULSE_SCAN_FORM_FIELDS' },
+          async (scanRes) => {
+            if (!scanRes?.ok || !Array.isArray(scanRes.fields)) {
+              statusMsg.textContent =
+                currentLang === 'bn'
+                  ? 'এই পেজে স্ক্যান করা যাচ্ছে না। যেকোনো http/https পেজে চেষ্টা করুন।'
+                  : 'Unable to scan this tab. Switch to an http/https webpage.';
+              return;
+            }
+            if (scanRes.fields.length === 0) {
+              statusMsg.textContent =
+                currentLang === 'bn'
+                  ? 'এই পেজে কোনো ইনপুট ফিল্ড পাওয়া যায়নি।'
+                  : 'No visible input fields detected on this page.';
+              return;
+            }
+            if (!activeSyncConn || !activeSyncConn.serverUrl) {
+              statusMsg.textContent =
+                currentLang === 'bn'
+                  ? `${scanRes.fields.length}টি ফিল্ড পাওয়া গেছে। AI অটো-ফিলের জন্য Account সিঙ্ক করুন বা Side Panel খুলুন।`
+                  : `Found ${scanRes.fields.length} fields. Sign in to sync with VeriPulse server or open Side Panel.`;
+              return;
+            }
+            try {
+              const base = String(activeSyncConn.serverUrl).replace(/\/+$/, '');
+              const aiRes = await fetch(`${base}/api/ai/scan-analyze`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  mode: 'autofill_only',
+                  url: scanRes.pageUrl,
+                  pageTitle: scanRes.pageTitle,
+                  locale: 'bd',
+                  dataTone: 'valid',
+                  lang: currentLang,
+                  domFields: scanRes.fields,
+                  pageTextSample: scanRes.pageTextSample || '',
+                }),
+              });
+              const aiJson = await aiRes.json().catch(() => ({}));
+              if (!aiRes.ok || !aiJson?.ok || !aiJson?.analysis) {
+                statusMsg.textContent = aiJson?.error || 'AI scan failed.';
+                return;
+              }
+              const toFill = (aiJson.analysis.detectedFields || []).map((f) => ({
+                selector: f.selector,
+                name: f.name,
+                value: f.generatedValue,
+              }));
+              ensureContentScriptAndSend(
+                tabId,
+                { type: 'VERIPULSE_AUTOFILL_FIELDS', fields: toFill },
+                (fillRes) => {
+                  const cnt = fillRes?.filledCount || 0;
+                  statusMsg.textContent =
+                    currentLang === 'bn'
+                      ? `${cnt}টি ফিল্ডে স্মার্ট ডাটা অটো-জেনারেট ও সেট করা হয়েছে!`
+                      : `Auto-generated & set ${cnt} field(s) on the active window!`;
+                }
+              );
+            } catch (err) {
+              statusMsg.textContent =
+                err instanceof Error ? err.message : 'Unable to reach VeriPulse server.';
+            }
+          }
+        );
+      });
+    });
+  }
+
+  if (smartSiteQaBtn) {
+    smartSiteQaBtn.addEventListener('click', () => {
+      chrome.runtime.sendMessage({
+        type: 'TESTALLY_OPEN_DASHBOARD',
+        section: 'smartScan',
+      });
+    });
+  }
 
   openDashBtn.addEventListener('click', () => {
     chrome.runtime.sendMessage({ type: 'TESTALLY_OPEN_DASHBOARD' });

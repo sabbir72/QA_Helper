@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   BellRing,
@@ -7,29 +7,39 @@ import {
   Bug,
   Calculator,
   CheckCircle2,
+  Cloud,
   GitBranch,
   Layers,
+  LogIn,
   Megaphone,
   Menu,
   Moon,
+  Navigation,
   Network,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Radar,
+  RefreshCw,
   RotateCcw,
   ScanEye,
   Settings,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Sun,
   Trash2,
+  UserCheck,
   Workflow,
   X,
 } from 'lucide-react';
+import { AccountSyncModal } from './components/AccountSyncModal';
 import { BugAndTestStudioView } from './components/BugAndTestStudioView';
 import { BusinessLogicView } from './components/BusinessLogicView';
 import { ContentFormulaView } from './components/ContentFormulaView';
 import { CoverageInspectorView } from './components/CoverageInspectorView';
 import { ExtensionSandboxView } from './components/ExtensionSandboxView';
+import { FakeGpsView } from './components/FakeGpsView';
 import { FlowchartStudioView } from './components/FlowchartStudioView';
 import { QaArchitectureDiagram } from './components/QaArchitectureDiagram';
 import { QaGuideView } from './components/QaGuideView';
@@ -37,20 +47,28 @@ import { RecycleBinView } from './components/RecycleBinView';
 import { RoleMatrixView } from './components/RoleMatrixView';
 import { SelfAlertView } from './components/SelfAlertView';
 import { SettingsView } from './components/SettingsView';
+import { SmartScreenQaView } from './components/SmartScreenQaView';
 import { VisualMatchView } from './components/VisualMatchView';
 import { WorkflowFlowsView } from './components/WorkflowFlowsView';
-import { DEFAULT_SCAN_RESULT, DEFAULT_WORKSPACE } from './data/defaultWorkspace';
+import {
+  DEFAULT_FAKE_GPS_CONFIG,
+  DEFAULT_SCAN_RESULT,
+  DEFAULT_WORKSPACE,
+} from './data/defaultWorkspace';
 import { pickLang, UI_COPY } from './i18n/translations';
 import {
   AppLanguage,
+  CloudSyncSession,
   CoverageScanResult,
   EnvironmentName,
+  FakeGpsConfig,
   InspectedElement,
   ProjectWorkspace,
   RecordedStep,
   RecordingState,
   RecycleBinItem,
   SelfAlert,
+  UserSyncBundle,
   WorkspaceState,
 } from './types/flowguard';
 import {
@@ -59,10 +77,14 @@ import {
   clearRecordedSteps,
   deleteSelfAlert,
   dismissFiredAlert,
+  getDefaultServerUrl,
   isChromeExtensionContext,
   loadInitialBundle,
   loadSelfAlerts,
   markSelfAlertTriggered,
+  pullCloudBundle,
+  pushCloudBundle,
+  saveFakeGpsConfig,
   saveInspectedElement,
   saveScanResult,
   saveTheme,
@@ -90,6 +112,8 @@ type SectionKey =
   | 'coverage'
   | 'diagram'
   | 'alerts'
+  | 'fakeGps'
+  | 'smartScan'
   | 'recycleBin'
   | 'guide'
   | 'extension'
@@ -184,6 +208,22 @@ const NAV_ITEMS: Array<{
     iconBgClass: 'bg-orange-100 dark:bg-orange-950 text-orange-600 dark:text-orange-400',
   },
   {
+    key: 'fakeGps',
+    stepNum: '11',
+    group: 'suite',
+    icon: Navigation,
+    activeClass: 'bg-cyan-50 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-300 font-semibold',
+    iconBgClass: 'bg-cyan-100 dark:bg-cyan-950 text-cyan-600 dark:text-cyan-400',
+  },
+  {
+    key: 'smartScan',
+    stepNum: '12',
+    group: 'suite',
+    icon: Sparkles,
+    activeClass: 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-semibold',
+    iconBgClass: 'bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400',
+  },
+  {
     key: 'overview',
     group: 'runtime',
     icon: Network,
@@ -251,6 +291,13 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [section, setSection] = useState<SectionKey>(getInitialSection);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('veripulse_sidebar_collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
   const [workspace, setWorkspace] = useState<WorkspaceState>(DEFAULT_WORKSPACE);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [lang, setLang] = useState<AppLanguage>(() => {
@@ -273,6 +320,16 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string>('');
   const [selfAlerts, setSelfAlerts] = useState<SelfAlert[]>([]);
   const [activeAlertPopup, setActiveAlertPopup] = useState<SelfAlert | null>(null);
+  const [fakeGps, setFakeGps] = useState<FakeGpsConfig>(DEFAULT_FAKE_GPS_CONFIG);
+  const [session, setSession] = useState<CloudSyncSession>(() => ({
+    user: null,
+    serverUrl: getDefaultServerUrl(),
+    bearerToken: '',
+    lastSyncedAt: null,
+  }));
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const skipNextPushRef = useRef(false);
   const [pendingDelete, setPendingDelete] = useState<{
     title: string;
     categoryLabel: string;
@@ -283,6 +340,18 @@ export default function App() {
 
   const notify = (msg: string) => {
     setToastMessage(msg);
+  };
+
+  const handleToggleSidebarCollapse = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('veripulse_sidebar_collapsed', next ? '1' : '0');
+      } catch {
+        // Ignore storage restrictions
+      }
+      return next;
+    });
   };
 
   const handleChangeLanguage = (nextLang: AppLanguage) => {
@@ -320,6 +389,7 @@ export default function App() {
     let active = true;
     Promise.all([loadInitialBundle(), loadSelfAlerts()]).then(([bundle, alertState]) => {
       if (!active) return;
+      skipNextPushRef.current = true;
       const cleanedBin = purgeExpiredRecycleBin(bundle.workspace.recycleBin);
       const initialWs =
         cleanedBin.length !== (bundle.workspace.recycleBin || []).length
@@ -333,7 +403,10 @@ export default function App() {
       setRecording(bundle.recording);
       setInspected(bundle.inspected);
       setLastScan(bundle.lastScan);
+      setFakeGps(bundle.fakeGps);
       setSelfAlerts(alertState.alerts);
+      setSession(bundle.session);
+      setSyncStatus(bundle.session.user ? 'synced' : 'idle');
       if (alertState.firedAlert) {
         setActiveAlertPopup(alertState.firedAlert);
       }
@@ -342,24 +415,46 @@ export default function App() {
 
     const unsub = subscribeStorageChanges((key, value) => {
       if (key === STORAGE_KEYS.WORKSPACE && value) {
+        skipNextPushRef.current = true;
         const ws = value as WorkspaceState;
         setWorkspace({ ...ws, recycleBin: purgeExpiredRecycleBin(ws.recycleBin) });
       } else if (key === STORAGE_KEYS.PREFERENCES && value) {
         const prefs = value as { theme?: 'light' | 'dark' };
         if (prefs.theme) setTheme(prefs.theme);
       } else if (key === STORAGE_KEYS.RECORDING && value) {
+        skipNextPushRef.current = true;
         setRecording(value as RecordingState);
       } else if (key === STORAGE_KEYS.INSPECTED) {
+        skipNextPushRef.current = true;
         setInspected((value as InspectedElement | null) || null);
       } else if (key === STORAGE_KEYS.LAST_SCAN && value) {
+        skipNextPushRef.current = true;
         setLastScan(value as CoverageScanResult);
       } else if (key === STORAGE_KEYS.ALERTS) {
+        skipNextPushRef.current = true;
         setSelfAlerts(Array.isArray(value) ? (value as SelfAlert[]) : []);
+      } else if (key === STORAGE_KEYS.FAKE_GPS && value) {
+        skipNextPushRef.current = true;
+        setFakeGps(value as FakeGpsConfig);
       } else if (key === STORAGE_KEYS.FIRED_ALERT) {
         const fired = (value as SelfAlert | null) || null;
         setActiveAlertPopup(fired);
         if (fired && fired.soundEnabled !== false) {
           playAlertChime();
+        }
+      } else if (key === 'veripulse_ext_sync_conn_v1') {
+        const conn = value as CloudSyncSession | undefined;
+        if (conn?.user) {
+          setSession(conn);
+          setSyncStatus('synced');
+        } else {
+          setSession({
+            user: null,
+            serverUrl: getDefaultServerUrl(),
+            bearerToken: '',
+            lastSyncedAt: null,
+          });
+          setSyncStatus('idle');
         }
       }
     });
@@ -373,6 +468,47 @@ export default function App() {
       window.removeEventListener('hashchange', onHashChange);
     };
   }, []);
+
+  // Auto-sync user workspace changes to the per-user isolated server store
+  useEffect(() => {
+    if (!loaded || !session.user) return;
+    if (skipNextPushRef.current) {
+      skipNextPushRef.current = false;
+      return;
+    }
+    setSyncStatus('syncing');
+    const timer = setTimeout(() => {
+      pushCloudBundle({
+        workspace,
+        fakeGps,
+        alerts: selfAlerts,
+        lastScan,
+        recording,
+        inspected,
+      }).then((res) => {
+        if (res.ok) {
+          setSyncStatus('synced');
+          if (res.updatedAt) {
+            setSession((prev) =>
+              prev.user ? { ...prev, lastSyncedAt: res.updatedAt! } : prev
+            );
+          }
+        } else {
+          setSyncStatus('error');
+        }
+      });
+    }, 850);
+    return () => clearTimeout(timer);
+  }, [
+    loaded,
+    session.user?.id,
+    workspace,
+    fakeGps,
+    selfAlerts,
+    lastScan,
+    recording,
+    inspected,
+  ]);
 
   const triggerPopupAndNotification = (alert: SelfAlert, persist = true) => {
     const triggered: SelfAlert = { ...alert, status: 'triggered' };
@@ -424,6 +560,137 @@ export default function App() {
       root.classList.remove('dark');
     }
   }, [theme]);
+
+  // Studio-level navigator.geolocation override when Fake GPS is enabled (so live probe works in preview too)
+  useEffect(() => {
+    if (!fakeGps.enabled || typeof navigator === 'undefined' || !navigator.geolocation) {
+      return;
+    }
+    const geo = navigator.geolocation;
+    const origGetCurrent = geo.getCurrentPosition.bind(geo);
+    const spoofedGetCurrent: Geolocation['getCurrentPosition'] = (success) => {
+      if (typeof success !== 'function') return;
+      const pos = {
+        coords: {
+          latitude: fakeGps.latitude,
+          longitude: fakeGps.longitude,
+          accuracy: Math.max(1, fakeGps.accuracy || 15),
+          altitude: fakeGps.altitude,
+          altitudeAccuracy: fakeGps.altitude !== null ? 5 : null,
+          heading: fakeGps.heading,
+          speed: fakeGps.speed,
+          toJSON() {
+            return this;
+          },
+        },
+        timestamp: Date.now(),
+        __veripulseSpoofed: true,
+        toJSON() {
+          return { coords: this.coords, timestamp: this.timestamp };
+        },
+      };
+      setTimeout(() => success(pos as unknown as GeolocationPosition), 15);
+    };
+    try {
+      Object.defineProperty(geo, 'getCurrentPosition', {
+        value: spoofedGetCurrent,
+        configurable: true,
+        writable: true,
+      });
+    } catch {
+      geo.getCurrentPosition = spoofedGetCurrent;
+    }
+    return () => {
+      try {
+        Object.defineProperty(geo, 'getCurrentPosition', {
+          value: origGetCurrent,
+          configurable: true,
+          writable: true,
+        });
+      } catch {
+        geo.getCurrentPosition = origGetCurrent;
+      }
+    };
+  }, [fakeGps]);
+
+  const applyCloudBundleToState = (bundle: UserSyncBundle) => {
+    skipNextPushRef.current = true;
+    const cleanedBin = purgeExpiredRecycleBin(bundle.workspace?.recycleBin);
+    const ws: WorkspaceState = {
+      ...(bundle.workspace || DEFAULT_WORKSPACE),
+      recycleBin: cleanedBin,
+    };
+    setWorkspace(ws);
+    if (ws.settings?.theme) {
+      setTheme(ws.settings.theme);
+    }
+    setFakeGps(bundle.fakeGps || DEFAULT_FAKE_GPS_CONFIG);
+    setSelfAlerts(Array.isArray(bundle.alerts) ? bundle.alerts : []);
+    setLastScan(bundle.lastScan || DEFAULT_SCAN_RESULT);
+    setRecording(bundle.recording || { isRecording: false, recordedSteps: [] });
+    setInspected(bundle.inspected || null);
+    setActiveAlertPopup(null);
+  };
+
+  const handleAuthSuccess = (
+    nextSession: CloudSyncSession,
+    bundle: UserSyncBundle
+  ) => {
+    setSession(nextSession);
+    applyCloudBundleToState(bundle);
+    setSyncStatus('synced');
+  };
+
+  const handleSignedOut = () => {
+    skipNextPushRef.current = true;
+    setSession({
+      user: null,
+      serverUrl: getDefaultServerUrl(),
+      bearerToken: '',
+      lastSyncedAt: null,
+    });
+    setWorkspace(DEFAULT_WORKSPACE);
+    setFakeGps(DEFAULT_FAKE_GPS_CONFIG);
+    setSelfAlerts([]);
+    setActiveAlertPopup(null);
+    setLastScan(DEFAULT_SCAN_RESULT);
+    setRecording({ isRecording: false, recordedSteps: [] });
+    setInspected(null);
+    setSyncStatus('idle');
+  };
+
+  const handleSyncNow = async () => {
+    if (!session.user) {
+      setAccountModalOpen(true);
+      return;
+    }
+    setSyncStatus('syncing');
+    const res = await pullCloudBundle();
+    if (res.ok && res.bundle) {
+      if (isChromeExtensionContext()) {
+        const alertsRes = await loadSelfAlerts();
+        applyCloudBundleToState({ ...res.bundle, alerts: alertsRes.alerts });
+      } else {
+        applyCloudBundleToState(res.bundle);
+      }
+      setSession((prev) => ({
+        ...prev,
+        user: res.user || prev.user,
+        lastSyncedAt: res.updatedAt || new Date().toISOString(),
+      }));
+      setSyncStatus('synced');
+      notify(
+        pickLang(
+          lang,
+          'Workspace synced with your isolated account.',
+          'আপনার অ্যাকাউন্টের সাথে ওয়ার্কস্পেস সিঙ্ক সম্পন্ন হয়েছে।'
+        )
+      );
+    } else {
+      setSyncStatus('error');
+      notify(res.error || 'Sync failed.');
+    }
+  };
 
   const activeProject = useMemo<ProjectWorkspace>(() => {
     return (
@@ -756,18 +1023,24 @@ export default function App() {
 
       {/* Left Navigation Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col transition-transform duration-150 lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 w-64 ${
+          sidebarCollapsed ? 'lg:w-[72px]' : 'lg:w-64'
+        } border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col transition-all duration-150 lg:static lg:translate-x-0 shrink-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="h-14 px-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
+        <div
+          className={`h-14 px-4 border-b border-slate-200 dark:border-slate-800 flex items-center ${
+            sidebarCollapsed ? 'justify-between lg:justify-center lg:px-2' : 'justify-between'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
             <img
               src="/icons/icon48.png"
               alt="VeriPulse"
               className="w-7 h-7 rounded-md shrink-0"
             />
-            <div className="leading-tight">
+            <div className={`leading-tight ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
               <div className="text-sm font-bold tracking-tight text-slate-900 dark:text-slate-100 whitespace-nowrap">
                 VeriPulse
               </div>
@@ -776,6 +1049,17 @@ export default function App() {
               </div>
             </div>
           </div>
+          {!sidebarCollapsed && (
+            <button
+              type="button"
+              onClick={handleToggleSidebarCollapse}
+              title={pickLang(lang, 'Collapse sidebar', 'সাইডবার ছোট করুন')}
+              aria-label="Collapse sidebar"
+              className="hidden lg:inline-flex p-1.5 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer shrink-0"
+            >
+              <PanelLeftClose className="w-4 h-4" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setSidebarOpen(false)}
@@ -787,7 +1071,11 @@ export default function App() {
         </div>
 
         {/* Project & Environment Switcher */}
-        <div className="p-4 border-b border-slate-200 dark:border-slate-800 space-y-2.5">
+        <div
+          className={`p-4 border-b border-slate-200 dark:border-slate-800 space-y-2.5 ${
+            sidebarCollapsed ? 'lg:hidden' : ''
+          }`}
+        >
           <div className="flex items-center justify-between">
             <label
               htmlFor="project-select"
@@ -861,21 +1149,60 @@ export default function App() {
           )}
         </div>
 
+        {/* Compact Environment Pill when Collapsed on Desktop */}
+        {sidebarCollapsed && (
+          <div className="hidden lg:flex flex-col items-center gap-1.5 py-2.5 border-b border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={handleToggleSidebarCollapse}
+              title={pickLang(lang, 'Expand sidebar', 'সাইডবার বড় করুন')}
+              aria-label="Expand sidebar"
+              className="p-1.5 rounded-md text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              <PanelLeftOpen className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const envs: EnvironmentName[] = ['staging', 'qa', 'production'];
+                const next = envs[(envs.indexOf(activeProject.activeEnvironment) + 1) % envs.length];
+                handleSwitchEnvironment(next);
+              }}
+              title={`${activeProject.name} · ${activeProject.activeEnvironment.toUpperCase()} (Click to cycle)`}
+              className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-[10px] font-mono font-bold uppercase text-slate-700 dark:text-slate-300 cursor-pointer"
+            >
+              {activeProject.activeEnvironment === 'production'
+                ? 'PRD'
+                : activeProject.activeEnvironment === 'staging'
+                  ? 'STG'
+                  : 'QA'}
+            </button>
+          </div>
+        )}
+
         {/* Sequential Module Navigation */}
-        <nav className="flex-1 p-3 space-y-5 overflow-y-auto">
+        <nav className={`flex-1 overflow-y-auto ${sidebarCollapsed ? 'p-3 lg:p-2 space-y-4' : 'p-3 space-y-5'}`}>
           <div className="space-y-1">
-            <div className="px-3 pb-1 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+            <div className={`px-3 pb-1 text-[11px] font-semibold text-slate-400 dark:text-slate-500 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
               {pickLang(lang, UI_COPY.suiteGroup.en, UI_COPY.suiteGroup.bn)}
             </div>
             {NAV_ITEMS.filter((i) => i.group === 'suite').map((item) => {
               const Icon = item.icon;
               const active = section === item.key;
+              const navLabel = pickLang(lang, UI_COPY.nav[item.key].en, UI_COPY.nav[item.key].bn);
+              const alertCount =
+                item.key === 'alerts'
+                  ? selfAlerts.filter((a) => a.status === 'scheduled').length
+                  : 0;
               return (
                 <button
                   key={item.key}
                   type="button"
+                  title={navLabel}
                   onClick={() => handleSelectSection(item.key)}
-                  className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                  className={`relative w-full flex items-center gap-2 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                    sidebarCollapsed ? 'justify-between px-2.5 lg:justify-center lg:px-2' : 'justify-between px-2.5'
+                  } ${
                     active
                       ? item.activeClass
                       : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60'
@@ -887,18 +1214,43 @@ export default function App() {
                     >
                       <Icon className="w-3.5 h-3.5" />
                     </span>
-                    <span className="truncate">
-                      {pickLang(lang, UI_COPY.nav[item.key].en, UI_COPY.nav[item.key].bn)}
+                    <span className={`truncate ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
+                      {navLabel}
                     </span>
                   </span>
-                  {item.key === 'alerts' &&
-                  selfAlerts.some((a) => a.status === 'scheduled') ? (
-                    <span className="px-1.5 py-0.5 rounded-full bg-orange-600 text-white text-[10px] font-mono font-bold shrink-0">
-                      {selfAlerts.filter((a) => a.status === 'scheduled').length}
-                    </span>
+                  {item.key === 'alerts' && alertCount > 0 ? (
+                    <>
+                      <span
+                        className={`px-1.5 py-0.5 rounded-full bg-orange-600 text-white text-[10px] font-mono font-bold shrink-0 ${
+                          sidebarCollapsed ? 'lg:hidden' : ''
+                        }`}
+                      >
+                        {alertCount}
+                      </span>
+                      {sidebarCollapsed && (
+                        <span className="hidden lg:block absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-orange-600" />
+                      )}
+                    </>
+                  ) : item.key === 'fakeGps' && fakeGps.enabled ? (
+                    <>
+                      <span
+                        className={`px-1.5 py-0.5 rounded-full bg-cyan-600 text-white text-[9px] font-mono font-bold shrink-0 ${
+                          sidebarCollapsed ? 'lg:hidden' : ''
+                        }`}
+                      >
+                        ON
+                      </span>
+                      {sidebarCollapsed && (
+                        <span className="hidden lg:block absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-cyan-600" />
+                      )}
+                    </>
                   ) : (
                     item.stepNum && (
-                      <span className="text-[10px] font-mono opacity-55 shrink-0">
+                      <span
+                        className={`text-[10px] font-mono opacity-55 shrink-0 ${
+                          sidebarCollapsed ? 'lg:hidden' : ''
+                        }`}
+                      >
                         {item.stepNum}
                       </span>
                     )
@@ -909,18 +1261,22 @@ export default function App() {
           </div>
 
           <div className="space-y-1">
-            <div className="px-3 pb-1 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+            <div className={`px-3 pb-1 text-[11px] font-semibold text-slate-400 dark:text-slate-500 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
               {pickLang(lang, UI_COPY.studioGroup.en, UI_COPY.studioGroup.bn)}
             </div>
             {NAV_ITEMS.filter((i) => i.group === 'runtime').map((item) => {
               const Icon = item.icon;
               const active = section === item.key;
+              const navLabel = pickLang(lang, UI_COPY.nav[item.key].en, UI_COPY.nav[item.key].bn);
               return (
                 <button
                   key={item.key}
                   type="button"
+                  title={navLabel}
                   onClick={() => handleSelectSection(item.key)}
-                  className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                  className={`relative w-full flex items-center gap-2 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                    sidebarCollapsed ? 'justify-between px-2.5 lg:justify-center lg:px-2' : 'justify-between px-2.5'
+                  } ${
                     active
                       ? item.activeClass
                       : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60'
@@ -932,14 +1288,23 @@ export default function App() {
                     >
                       <Icon className="w-3.5 h-3.5" />
                     </span>
-                    <span className="truncate">
-                      {pickLang(lang, UI_COPY.nav[item.key].en, UI_COPY.nav[item.key].bn)}
+                    <span className={`truncate ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
+                      {navLabel}
                     </span>
                   </span>
                   {item.key === 'recycleBin' && activeRecycleBin.length > 0 && (
-                    <span className="px-1.5 py-0.5 rounded-md bg-rose-600 text-white text-[10px] font-mono font-bold shrink-0">
-                      {activeRecycleBin.length}
-                    </span>
+                    <>
+                      <span
+                        className={`px-1.5 py-0.5 rounded-md bg-rose-600 text-white text-[10px] font-mono font-bold shrink-0 ${
+                          sidebarCollapsed ? 'lg:hidden' : ''
+                        }`}
+                      >
+                        {activeRecycleBin.length}
+                      </span>
+                      {sidebarCollapsed && (
+                        <span className="hidden lg:block absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-600" />
+                      )}
+                    </>
                   )}
                 </button>
               );
@@ -947,13 +1312,55 @@ export default function App() {
           </div>
         </nav>
 
-        <div className="p-4 border-t border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 space-y-0.5">
-          <div className="font-semibold text-slate-700 dark:text-slate-300">
-            {isChromeExtensionContext()
-              ? pickLang(lang, 'Chrome Extension Active', 'ক্রোম এক্সটেনশন সক্রিয়')
-              : pickLang(lang, 'Interactive Web Preview', 'ওয়েব প্রিভিউ মোড')}
+        <div
+          className={`border-t border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 space-y-2 ${
+            sidebarCollapsed ? 'p-4 lg:p-2' : 'p-4'
+          }`}
+        >
+          <button
+            type="button"
+            title={
+              session.user
+                ? session.user.name
+                : pickLang(lang, 'Guest (0-Leak Mode)', 'গেস্ট সেশন (সাইন ইন)')
+            }
+            onClick={() => setAccountModalOpen(true)}
+            className={`w-full flex items-center gap-2 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 hover:border-blue-300 dark:hover:border-blue-700 transition-colors text-left cursor-pointer ${
+              sidebarCollapsed ? 'justify-between px-2.5 lg:justify-center lg:px-2' : 'justify-between px-2.5'
+            }`}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              {session.user ? (
+                <UserCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              ) : (
+                <LogIn className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+              )}
+              <span className={`truncate font-semibold text-slate-800 dark:text-slate-200 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
+                {session.user
+                  ? session.user.name
+                  : pickLang(lang, 'Guest (0-Leak Mode)', 'গেস্ট সেশন (সাইন ইন)')}
+              </span>
+            </span>
+            {session.user && (
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  syncStatus === 'syncing'
+                    ? 'bg-amber-500'
+                    : syncStatus === 'error'
+                      ? 'bg-rose-500'
+                      : 'bg-emerald-500'
+                }`}
+              />
+            )}
+          </button>
+          <div className={`space-y-0.5 px-0.5 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
+            <div className="font-semibold text-slate-700 dark:text-slate-300">
+              {isChromeExtensionContext()
+                ? pickLang(lang, 'Chrome Extension Active', 'ক্রোম এক্সটেনশন সক্রিয়')
+                : pickLang(lang, 'Full Web + Extension Sync', 'ফুল ওয়েব ও এক্সটেনশন সিঙ্ক')}
+            </div>
+            <div className="font-mono truncate">{activeProject.domain}</div>
           </div>
-          <div className="font-mono truncate">{activeProject.domain}</div>
         </div>
       </aside>
 
@@ -969,6 +1376,23 @@ export default function App() {
               aria-label="Open navigation"
             >
               <Menu className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleToggleSidebarCollapse}
+              title={
+                sidebarCollapsed
+                  ? pickLang(lang, 'Expand sidebar', 'সাইডবার বড় করুন')
+                  : pickLang(lang, 'Collapse sidebar', 'সাইডবার ছোট করুন')
+              }
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="hidden lg:inline-flex p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer shrink-0"
+            >
+              {sidebarCollapsed ? (
+                <PanelLeftOpen className="w-4 h-4" />
+              ) : (
+                <PanelLeftClose className="w-4 h-4" />
+              )}
             </button>
             <div className="flex items-center gap-2 text-xs sm:text-sm min-w-0 truncate">
               <span className="text-slate-500 dark:text-slate-400 truncate">
@@ -1051,6 +1475,29 @@ export default function App() {
               ) : (
                 <Moon className="w-4 h-4" />
               )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setAccountModalOpen(true)}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer whitespace-nowrap transition-colors ${
+                session.user
+                  ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                  : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/70 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              {syncStatus === 'syncing' ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : session.user ? (
+                <Cloud className="w-3.5 h-3.5" />
+              ) : (
+                <LogIn className="w-3.5 h-3.5" />
+              )}
+              <span className="max-w-[110px] truncate">
+                {session.user
+                  ? session.user.name
+                  : pickLang(lang, 'Sign In', 'সাইন ইন')}
+              </span>
             </button>
 
             <button
@@ -1380,6 +1827,7 @@ export default function App() {
 
               {section === 'coverage' && (
                 <CoverageInspectorView
+                  lang={lang}
                   inspected={inspected}
                   lastScan={lastScan}
                   onUpdateScan={handleUpdateScan}
@@ -1454,6 +1902,31 @@ export default function App() {
                   onTriggerTestAlert={(demoAlert) => {
                     triggerPopupAndNotification(demoAlert, false);
                   }}
+                  onNotify={notify}
+                />
+              )}
+
+              {section === 'fakeGps' && (
+                <FakeGpsView
+                  project={activeProject}
+                  lang={lang}
+                  config={fakeGps}
+                  onUpdateConfig={(nextCfg) => {
+                    setFakeGps(nextCfg);
+                    saveFakeGpsConfig(nextCfg);
+                  }}
+                  onUpdateProject={handleUpdateProject}
+                  onNotify={notify}
+                />
+              )}
+
+              {section === 'smartScan' && (
+                <SmartScreenQaView
+                  project={activeProject}
+                  lang={lang}
+                  screenshotConsentGranted={workspace.settings.screenshotConsentGranted}
+                  onUpdateProject={handleUpdateProject}
+                  onOpenSection={(s) => handleSelectSection(s as SectionKey)}
                   onNotify={notify}
                 />
               )}
@@ -1588,7 +2061,10 @@ export default function App() {
                 <ExtensionSandboxView
                   project={activeProject}
                   lang={lang}
+                  session={session}
                   onOpenSection={(s) => handleSelectSection(s as SectionKey)}
+                  onOpenAccountModal={() => setAccountModalOpen(true)}
+                  onSyncNow={handleSyncNow}
                   onNotify={notify}
                 />
               )}
@@ -1597,6 +2073,9 @@ export default function App() {
                 <SettingsView
                   workspace={workspace}
                   theme={theme}
+                  lang={lang}
+                  session={session}
+                  onOpenAccountModal={() => setAccountModalOpen(true)}
                   onToggleTheme={handleToggleTheme}
                   onUpdateWorkspace={handleUpdateWorkspace}
                   onResetWorkspace={() => {
@@ -1636,6 +2115,7 @@ export default function App() {
                         setRecording({ isRecording: false, recordedSteps: [] });
                         setSelfAlerts([]);
                         setActiveAlertPopup(null);
+                        setFakeGps(DEFAULT_FAKE_GPS_CONFIG);
                         notify(
                           pickLang(
                             lang,
@@ -1869,6 +2349,19 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Account & Cross-Device Extension Sync Modal */}
+      <AccountSyncModal
+        open={accountModalOpen}
+        lang={lang}
+        session={session}
+        syncStatus={syncStatus}
+        onClose={() => setAccountModalOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
+        onSignedOut={handleSignedOut}
+        onSyncNow={handleSyncNow}
+        onNotify={notify}
+      />
 
       {/* Non-intrusive Action Toast */}
       <AnimatePresence>

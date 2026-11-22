@@ -1,21 +1,41 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
+  Bold,
   BookMarked,
+  Calculator,
   Check,
   CheckCircle2,
+  CheckSquare,
   ClipboardCopy,
+  Code,
+  Columns2,
+  Download,
+  Eye,
   FileText,
   Filter,
+  Heading1,
+  Heading2,
   Highlighter,
+  Italic,
+  List,
+  ListOrdered,
   MapPin,
   MessageSquareMore,
+  Minus,
   Pencil,
+  PenLine,
   Pin,
   Plus,
+  Printer,
+  Quote,
   Search,
   ShieldCheck,
+  Sigma,
   StickyNote,
+  Strikethrough,
+  Table,
   Trash2,
+  Underline,
   X,
 } from 'lucide-react';
 import {
@@ -29,6 +49,10 @@ import {
   HighlightColor,
   ProjectWorkspace,
 } from '../types/flowguard';
+import {
+  buildWordCompatibleDocHtml,
+  evaluateDocFormula,
+} from '../utils/docRichFormatter';
 
 export type KnowledgeSubTab = 'docs' | 'notes_discussions' | 'policies';
 
@@ -174,6 +198,399 @@ function renderHighlightedText(
   );
 }
 
+const DOC_SYMBOLS = ['∑', '≥', '≤', '≠', '×', '÷', '±', '≈', '→', '√', 'Δ', '%', '৳', '$'];
+
+const DOC_FORMULA_PRESETS: Array<{ label: string; expr: string }> = [
+  { label: 'SUM()', expr: 'SUM(1500, 250, 75)' },
+  { label: 'AVG()', expr: 'AVG(120, 150, 180)' },
+  { label: 'IF()', expr: 'IF(1200 >= 1000, 1200 * 0.9, 1200)' },
+  { label: 'PCT()', expr: 'PCT(45, 200)' },
+  { label: 'ROUND()', expr: 'ROUND(199.95 * 1.15, 2)' },
+  { label: 'MIN()', expr: 'MIN(500, 350, 420)' },
+  { label: 'MAX()', expr: 'MAX(100, 250, 180)' },
+];
+
+function renderRichInlineTokens(
+  text: string,
+  highlights: BusinessDocHighlight[],
+  keyPrefix: string
+): React.ReactNode {
+  const tokenRegex =
+    /(\{\{=\s*[^}]+?\s*\}\}|\*\*[^*\n]+?\*\*|__[^_\n]+?__|~~[^~\n]+?~~|==[^=\n]+?==|`[^`\n]+?`|\*[^*\n]+?\*)/g;
+  const parts: React.ReactNode[] = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+  let tokenCounter = 0;
+
+  while ((match = tokenRegex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      parts.push(
+        <React.Fragment key={`${keyPrefix}_t_${tokenCounter++}`}>
+          {renderHighlightedText(text.slice(lastIdx, match.index), highlights)}
+        </React.Fragment>
+      );
+    }
+
+    const tok = match[0];
+    if (tok.startsWith('{{=') && tok.endsWith('}}')) {
+      const expr = tok.slice(3, -2).trim();
+      const evaluated = evaluateDocFormula(expr);
+      parts.push(
+        <span
+          key={`${keyPrefix}_fx_${tokenCounter++}`}
+          title={
+            evaluated.ok
+              ? `Formula: =${expr} → ${evaluated.value}`
+              : `Formula error: ${evaluated.error}`
+          }
+          className={`inline-flex items-center gap-1.5 mx-0.5 px-2 py-0.5 rounded-md border font-mono text-[11px] align-baseline ${
+            evaluated.ok
+              ? 'border-emerald-300 dark:border-emerald-700/80 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200'
+              : 'border-rose-300 dark:border-rose-700/80 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300'
+          }`}
+        >
+          <span className="text-[10px] font-bold uppercase tracking-wider opacity-75">
+            fx
+          </span>
+          <span className="opacity-80">={expr}</span>
+          <span className="opacity-60">⇒</span>
+          <strong className="font-bold">
+            {evaluated.ok ? evaluated.value : evaluated.error}
+          </strong>
+        </span>
+      );
+    } else if (tok.startsWith('**') && tok.endsWith('**')) {
+      parts.push(
+        <strong
+          key={`${keyPrefix}_b_${tokenCounter++}`}
+          className="font-bold text-slate-950 dark:text-white"
+        >
+          {renderHighlightedText(tok.slice(2, -2), highlights)}
+        </strong>
+      );
+    } else if (tok.startsWith('__') && tok.endsWith('__')) {
+      parts.push(
+        <span
+          key={`${keyPrefix}_u_${tokenCounter++}`}
+          className="underline decoration-2 underline-offset-2 decoration-amber-500/80"
+        >
+          {renderHighlightedText(tok.slice(2, -2), highlights)}
+        </span>
+      );
+    } else if (tok.startsWith('~~') && tok.endsWith('~~')) {
+      parts.push(
+        <span
+          key={`${keyPrefix}_s_${tokenCounter++}`}
+          className="line-through opacity-70"
+        >
+          {renderHighlightedText(tok.slice(2, -2), highlights)}
+        </span>
+      );
+    } else if (tok.startsWith('==') && tok.endsWith('==')) {
+      parts.push(
+        <mark
+          key={`${keyPrefix}_m_${tokenCounter++}`}
+          className="bg-amber-200/90 dark:bg-amber-500/35 text-slate-950 dark:text-amber-100 rounded px-1 py-0.5"
+        >
+          {renderHighlightedText(tok.slice(2, -2), highlights)}
+        </mark>
+      );
+    } else if (tok.startsWith('`') && tok.endsWith('`')) {
+      parts.push(
+        <code
+          key={`${keyPrefix}_c_${tokenCounter++}`}
+          className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 font-mono text-[11px] text-rose-700 dark:text-rose-300"
+        >
+          {tok.slice(1, -1)}
+        </code>
+      );
+    } else if (tok.startsWith('*') && tok.endsWith('*')) {
+      parts.push(
+        <em key={`${keyPrefix}_i_${tokenCounter++}`} className="italic">
+          {renderHighlightedText(tok.slice(1, -1), highlights)}
+        </em>
+      );
+    }
+
+    lastIdx = tokenRegex.lastIndex;
+  }
+
+  if (lastIdx < text.length) {
+    parts.push(
+      <React.Fragment key={`${keyPrefix}_tail`}>
+        {renderHighlightedText(text.slice(lastIdx), highlights)}
+      </React.Fragment>
+    );
+  }
+
+  return parts.length > 0 ? parts : renderHighlightedText(text, highlights);
+}
+
+function renderFormattedDocContent(
+  content: string,
+  highlights: BusinessDocHighlight[],
+  onToggleChecklistLine?: (lineIndex: number) => void
+): React.ReactNode {
+  const lines = content.split(/\r?\n/);
+  const blocks: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const rawLine = lines[i];
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) {
+      i += 1;
+      continue;
+    }
+
+    if (trimmed === '---' || trimmed === '***') {
+      blocks.push(
+        <hr
+          key={`hr_${i}`}
+          className="my-3 border-t border-slate-200 dark:border-slate-800"
+        />
+      );
+      i += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith('### ')) {
+      blocks.push(
+        <h5
+          key={`h3_${i}`}
+          className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 pt-1.5"
+        >
+          {renderRichInlineTokens(trimmed.slice(4), highlights, `h3_${i}`)}
+        </h5>
+      );
+      i += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith('## ')) {
+      blocks.push(
+        <h4
+          key={`h2_${i}`}
+          className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 border-b border-slate-200/80 dark:border-slate-800 pb-1 pt-2"
+        >
+          {renderRichInlineTokens(trimmed.slice(3), highlights, `h2_${i}`)}
+        </h4>
+      );
+      i += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith('# ')) {
+      blocks.push(
+        <h3
+          key={`h1_${i}`}
+          className="text-base sm:text-lg font-extrabold text-slate-950 dark:text-white tracking-tight pt-1"
+        >
+          {renderRichInlineTokens(trimmed.slice(2), highlights, `h1_${i}`)}
+        </h3>
+      );
+      i += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith('> ')) {
+      const quoteLines: Array<{ idx: number; text: string }> = [];
+      while (i < lines.length && lines[i].trim().startsWith('> ')) {
+        quoteLines.push({ idx: i, text: lines[i].trim().slice(2) });
+        i += 1;
+      }
+      blocks.push(
+        <blockquote
+          key={`bq_${quoteLines[0].idx}`}
+          className="border-l-4 border-amber-500 bg-amber-50/70 dark:bg-amber-950/25 px-3.5 py-2 rounded-r-lg text-xs sm:text-[13px] text-slate-700 dark:text-slate-300 space-y-1"
+        >
+          {quoteLines.map((q) => (
+            <p key={`bq_l_${q.idx}`}>
+              {renderRichInlineTokens(q.text, highlights, `bq_${q.idx}`)}
+            </p>
+          ))}
+        </blockquote>
+      );
+      continue;
+    }
+
+    // Markdown Table block
+    if (trimmed.startsWith('|') && trimmed.includes('|', 1)) {
+      const startIdx = i;
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        tableLines.push(lines[i].trim());
+        i += 1;
+      }
+      const parsedRows = tableLines
+        .filter((r) => !/^\|[\s:|-]+\|?$/.test(r))
+        .map((r) =>
+          r
+            .slice(1, r.endsWith('|') ? -1 : undefined)
+            .split('|')
+            .map((cell) => cell.trim())
+        );
+      if (parsedRows.length > 0) {
+        const [headerRow, ...bodyRows] = parsedRows;
+        blocks.push(
+          <div
+            key={`tbl_${startIdx}`}
+            className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700 my-1.5"
+          >
+            <table className="w-full border-collapse text-left text-xs">
+              <thead>
+                <tr className="bg-slate-100/90 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
+                  {headerRow.map((cell, cIdx) => (
+                    <th
+                      key={cIdx}
+                      className="px-3 py-2 font-semibold text-slate-800 dark:text-slate-100 border-r last:border-r-0 border-slate-200 dark:border-slate-700"
+                    >
+                      {renderRichInlineTokens(cell, highlights, `th_${startIdx}_${cIdx}`)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                {bodyRows.map((row, rIdx) => (
+                  <tr
+                    key={rIdx}
+                    className="bg-white dark:bg-slate-950/60 hover:bg-slate-50 dark:hover:bg-slate-900/60"
+                  >
+                    {headerRow.map((_, cIdx) => (
+                      <td
+                        key={cIdx}
+                        className="px-3 py-2 text-slate-700 dark:text-slate-300 border-r last:border-r-0 border-slate-200 dark:border-slate-800"
+                      >
+                        {renderRichInlineTokens(
+                          row[cIdx] ?? '',
+                          highlights,
+                          `td_${startIdx}_${rIdx}_${cIdx}`
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+      continue;
+    }
+
+    // Bullet / Checklist block
+    if (/^[-*]\s+/.test(trimmed)) {
+      const startIdx = i;
+      const items: Array<{ idx: number; raw: string }> = [];
+      while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
+        items.push({ idx: i, raw: lines[i].trim().replace(/^[-*]\s+/, '') });
+        i += 1;
+      }
+      blocks.push(
+        <ul key={`ul_${startIdx}`} className="space-y-1.5 pl-1">
+          {items.map((item) => {
+            const isUnchecked = item.raw.startsWith('[ ] ');
+            const isChecked =
+              item.raw.startsWith('[x] ') || item.raw.startsWith('[X] ');
+            if (isUnchecked || isChecked) {
+              return (
+                <li
+                  key={`chk_${item.idx}`}
+                  className="flex items-start gap-2 text-xs sm:text-[13px]"
+                >
+                  <button
+                    type="button"
+                    disabled={!onToggleChecklistLine}
+                    onClick={() => onToggleChecklistLine?.(item.idx)}
+                    aria-label={isChecked ? 'Uncheck item' : 'Check item'}
+                    className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                      isChecked
+                        ? 'bg-emerald-600 border-emerald-600 text-white'
+                        : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900'
+                    } ${onToggleChecklistLine ? 'cursor-pointer hover:border-emerald-500' : 'cursor-default'}`}
+                  >
+                    {isChecked && <Check className="w-3 h-3" />}
+                  </button>
+                  <span
+                    className={
+                      isChecked
+                        ? 'line-through text-slate-400 dark:text-slate-500'
+                        : 'text-slate-800 dark:text-slate-200'
+                    }
+                  >
+                    {renderRichInlineTokens(
+                      item.raw.slice(4),
+                      highlights,
+                      `chk_${item.idx}`
+                    )}
+                  </span>
+                </li>
+              );
+            }
+            return (
+              <li
+                key={`li_${item.idx}`}
+                className="flex items-start gap-2 text-xs sm:text-[13px] text-slate-800 dark:text-slate-200"
+              >
+                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                <span>
+                  {renderRichInlineTokens(item.raw, highlights, `li_${item.idx}`)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      );
+      continue;
+    }
+
+    // Numbered List block
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const startIdx = i;
+      const items: Array<{ idx: number; num: string; text: string }> = [];
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
+        const m = lines[i].trim().match(/^(\d+)\.\s+(.*)$/);
+        if (m) {
+          items.push({ idx: i, num: m[1], text: m[2] });
+        }
+        i += 1;
+      }
+      blocks.push(
+        <ol key={`ol_${startIdx}`} className="space-y-1.5 pl-1">
+          {items.map((item) => (
+            <li
+              key={`oli_${item.idx}`}
+              className="flex items-start gap-2 text-xs sm:text-[13px] text-slate-800 dark:text-slate-200"
+            >
+              <span className="font-mono text-[11px] font-semibold text-amber-600 dark:text-amber-400 mt-0.5 shrink-0">
+                {item.num}.
+              </span>
+              <span>
+                {renderRichInlineTokens(item.text, highlights, `oli_${item.idx}`)}
+              </span>
+            </li>
+          ))}
+        </ol>
+      );
+      continue;
+    }
+
+    // Regular Paragraph
+    blocks.push(
+      <p
+        key={`p_${i}`}
+        className="text-xs sm:text-[13px] leading-relaxed text-slate-800 dark:text-slate-200"
+      >
+        {renderRichInlineTokens(rawLine, highlights, `p_${i}`)}
+      </p>
+    );
+    i += 1;
+  }
+
+  return <div className="space-y-2">{blocks}</div>;
+}
+
 export const BusinessKnowledgePanels: React.FC<BusinessKnowledgePanelsProps> = ({
   mode,
   project,
@@ -189,6 +606,7 @@ export const BusinessKnowledgePanels: React.FC<BusinessKnowledgePanelsProps> = (
   const policies = project.businessPolicies || [];
 
   // -------------------- DOCUMENTATION STATE --------------------
+  const docTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [docSearch, setDocSearch] = useState('');
   const [docMarkFilter, setDocMarkFilter] = useState<
     'all' | 'marked_only' | 'highlighted' | BusinessDocMarkStatus
@@ -198,6 +616,11 @@ export const BusinessKnowledgePanels: React.FC<BusinessKnowledgePanelsProps> = (
   const [docContent, setDocContent] = useState('');
   const [docMarkStatus, setDocMarkStatus] = useState<BusinessDocMarkStatus>('important');
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
+  const [docEditorView, setDocEditorView] = useState<'write' | 'split' | 'preview'>('split');
+  const [showFormulaBar, setShowFormulaBar] = useState(true);
+  const [showSymbolsBar, setShowSymbolsBar] = useState(false);
+  const [formulaInput, setFormulaInput] = useState('SUM(1500, 250) - 100');
+  const [copiedDocId, setCopiedDocId] = useState<string | null>(null);
 
   // Text-selection highlighter state per document
   const [hlDocId, setHlDocId] = useState<string | null>(null);
@@ -373,6 +796,130 @@ export const BusinessKnowledgePanels: React.FC<BusinessKnowledgePanelsProps> = (
       ...project,
       businessDocs: docs.filter((d) => d.id !== docId),
     });
+  };
+
+  const handleToggleChecklistInDoc = (docId: string, lineIndex: number) => {
+    const nextDocs = docs.map((d) => {
+      if (d.id !== docId) return d;
+      const lines = d.content.split(/\r?\n/);
+      const target = lines[lineIndex];
+      if (!target) return d;
+      if (/^(\s*[-*]\s+)\[ \](\s+.*)$/.test(target)) {
+        lines[lineIndex] = target.replace(/^(\s*[-*]\s+)\[ \](\s+.*)$/, '$1[x]$2');
+      } else if (/^(\s*[-*]\s+)\[[xX]\](\s+.*)$/.test(target)) {
+        lines[lineIndex] = target.replace(/^(\s*[-*]\s+)\[[xX]\](\s+.*)$/, '$1[ ]$2');
+      }
+      return {
+        ...d,
+        content: lines.join('\n'),
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    onUpdateProject({ ...project, businessDocs: nextDocs });
+  };
+
+  const insertAroundSelection = (
+    prefix: string,
+    suffix: string,
+    placeholder: string
+  ) => {
+    const el = docTextareaRef.current;
+    if (!el) {
+      setDocContent((prev) => `${prev}${prefix}${placeholder}${suffix}`);
+      return;
+    }
+    const start = el.selectionStart ?? docContent.length;
+    const end = el.selectionEnd ?? docContent.length;
+    const selected = docContent.slice(start, end) || placeholder;
+    const updated =
+      docContent.slice(0, start) + prefix + selected + suffix + docContent.slice(end);
+    setDocContent(updated);
+    requestAnimationFrame(() => {
+      el.focus();
+      const selStart = start + prefix.length;
+      el.setSelectionRange(selStart, selStart + selected.length);
+    });
+  };
+
+  const insertLineOrBlock = (snippet: string, ensureNewLine = true) => {
+    const el = docTextareaRef.current;
+    if (!el) {
+      setDocContent((prev) =>
+        prev ? `${prev}${ensureNewLine ? '\n' : ''}${snippet}` : snippet
+      );
+      return;
+    }
+    const start = el.selectionStart ?? docContent.length;
+    const end = el.selectionEnd ?? docContent.length;
+    const before = docContent.slice(0, start);
+    const needLeadNewLine = ensureNewLine && before.length > 0 && !before.endsWith('\n');
+    const insertion = (needLeadNewLine ? '\n' : '') + snippet;
+    const updated = before + insertion + docContent.slice(end);
+    setDocContent(updated);
+    requestAnimationFrame(() => {
+      el.focus();
+      const cursor = start + insertion.length;
+      el.setSelectionRange(cursor, cursor);
+    });
+  };
+
+  const handleInsertFormulaIntoDoc = () => {
+    const cleaned = formulaInput.trim().replace(/^=+/, '').trim();
+    if (!cleaned) return;
+    insertLineOrBlock(`{{=${cleaned}}}`, false);
+    onNotify?.(t('Formula inserted into document.', 'ডকুমেন্টে ফর্মুলা যুক্ত হয়েছে।'));
+  };
+
+  const handleInsertWordSpecTemplate = () => {
+    const template = `# Checkout & Discount Calculation Spec
+## 1. Business Formula Rule
+Final Payable: {{=ROUND(SUM(1500, 250) * 0.9, 2)}} (10% VIP discount applied)
+
+| Tier | Min Cart | Discount Rule | Max Cap |
+| --- | --- | --- | --- |
+| Silver | 1000 | **5%** | 200 |
+| Gold | 2000 | **10%** | 500 |
+
+> Note: Promo code and loyalty points cannot exceed ==30%== of order subtotal.
+
+- [ ] Verify tax applies *after* discount deduction
+- [ ] Verify negative balance triggers \`ERR_INVALID_TOTAL\``;
+    setDocContent((prev) => (prev.trim() ? `${prev}\n\n${template}` : template));
+    if (!docTitle.trim()) {
+      setDocTitle(t('Discount & Tax Business Spec', 'ডিসকাউন্ট ও ট্যাক্স বিজনেস স্পেক'));
+    }
+  };
+
+  const handleExportDocAsWord = (doc: BusinessDocItem) => {
+    const html = buildWordCompatibleDocHtml({
+      title: doc.title,
+      sectionRef: doc.sectionRef,
+      markStatus: doc.markStatus,
+      updatedAt: doc.updatedAt,
+      content: doc.content,
+    });
+    const blob = new Blob(['\ufeff', html], { type: 'application/msword;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const slug = doc.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+    a.href = url;
+    a.download = `${slug || 'business-rule'}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    onNotify?.(t('Exported as Microsoft Word (.doc).', 'MS Word (.doc) ফাইলে ডাউনলোড হয়েছে।'));
+  };
+
+  const handleCopyDocContent = (doc: BusinessDocItem) => {
+    const text = `# ${doc.title}\nRef: ${doc.sectionRef} · Status: ${doc.markStatus}\n\n${doc.content}`;
+    navigator.clipboard?.writeText(text).catch(() => {});
+    setCopiedDocId(doc.id);
+    setTimeout(() => setCopiedDocId(null), 1600);
+    onNotify?.(t('Document copied.', 'ডকুমেন্ট কপি করা হয়েছে।'));
   };
 
   // ==================== NOTES HANDLERS ====================
@@ -624,33 +1171,36 @@ export const BusinessKnowledgePanels: React.FC<BusinessKnowledgePanelsProps> = (
     onNotify?.(t('Policies copied as Markdown.', 'সব পলিসি Markdown হিসেবে কপি হয়েছে।'));
   };
 
-  // ==================== RENDER: DOCUMENTATION & MARKABLE HIGHLIGHTS ====================
+  // ==================== RENDER: DOCUMENTATION & MS WORD / FORMULA STUDIO ====================
   if (mode === 'docs') {
     const markedCount = docs.filter((d) => d.markStatus !== 'unmarked').length;
     const totalInlineHighlights = docs.reduce((sum, d) => sum + d.highlights.length, 0);
+    const liveFormulaEval = evaluateDocFormula(formulaInput);
+    const wordCount = docContent.trim() ? docContent.trim().split(/\s+/).length : 0;
+    const formulaCount = (docContent.match(/\{\{=\s*[^}]+?\s*\}\}/g) || []).length;
 
     return (
       <div className="space-y-5">
-        {/* Composer Form */}
+        {/* MS Word / Google Docs Composer Form */}
         <form
           onSubmit={handleSaveDoc}
-          className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4 shadow-xs"
+          className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-3.5 shadow-xs"
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 {editingDocId
-                  ? t('Edit Business Rule Documentation', 'বিজনেস রুল ডকুমেন্টেশন এডিট করুন')
-                  : t('Write Business Rule Documentation', 'বিজনেস রুল ডকুমেন্টেশন লিখুন')}
+                  ? t('Edit Business Rule Document', 'বিজনেস রুল ডকুমেন্ট এডিট করুন')
+                  : t('MS Word & Formula Document Studio', 'MS Word ও ফর্মুলা ডকুমেন্ট স্টুডিও')}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 {t(
-                  'Document business rules, mark important specs, and highlight specific lines directly inside any document.',
-                  'বিজনেস রুলস লিখে রাখুন, জরুরি ডকুমেন্ট মার্ক করুন এবং টেক্সট সিলেক্ট করে ভেতরের যেকোনো অংশ হাইলাইট করুন।'
+                  'Format specs like MS Word / Google Docs, embed live {{=SUM(...)}} calculations, and export to .doc.',
+                  'MS Word / Google Docs-এর মতো হেডিং, টেবিল, চেকলিস্ট ও লাইভ {{=SUM(...)}} ফর্মুলা লিখে ডকুমেন্ট তৈরি এবং .doc এক্সপোর্ট করুন।'
                 )}
               </p>
             </div>
-            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
               <span>{docs.length} {t('docs', 'ডক')}</span>
               <span aria-hidden="true">·</span>
               <span>{markedCount} {t('marked', 'মার্কড')}</span>
@@ -688,43 +1238,366 @@ export const BusinessKnowledgePanels: React.FC<BusinessKnowledgePanelsProps> = (
             </select>
           </div>
 
-          <textarea
-            rows={3}
-            value={docContent}
-            onChange={(e) => setDocContent(e.target.value)}
-            placeholder={t(
-              'Write detailed rules, expected behaviors, calculations, and boundary cases...',
-              'রুলস, হিসাব, ব্যতিক্রম এবং QA পরীক্ষার শর্ত বিস্তারিত লিখুন...'
-            )}
-            required
-            className="w-full px-3 py-2 text-xs leading-relaxed rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
-          />
+          {/* MS Word / Google Docs Formatting Ribbon */}
+          <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/80 p-2 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => insertLineOrBlock('# Heading Title')}
+                  title={t('Heading 1', 'হেডিং ১')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <Heading1 className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertLineOrBlock('## Section Heading')}
+                  title={t('Heading 2', 'হেডিং ২')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <Heading2 className="w-3.5 h-3.5" />
+                </button>
+                <span className="h-4 w-px bg-slate-300 dark:bg-slate-700 mx-0.5" />
+                <button
+                  type="button"
+                  onClick={() => insertAroundSelection('**', '**', 'bold text')}
+                  title={t('Bold', 'বোল্ড')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <Bold className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertAroundSelection('*', '*', 'italic text')}
+                  title={t('Italic', 'ইটালিক')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <Italic className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertAroundSelection('__', '__', 'underlined')}
+                  title={t('Underline', 'আন্ডারলাইন')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <Underline className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertAroundSelection('~~', '~~', 'removed')}
+                  title={t('Strikethrough', 'স্ট্রাইকথ্রু')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <Strikethrough className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertAroundSelection('==', '==', 'important')}
+                  title={t('Text Highlight', 'টেক্সট হাইলাইট')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-amber-600 dark:text-amber-400 cursor-pointer"
+                >
+                  <Highlighter className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertAroundSelection('`', '`', 'ERR_CODE')}
+                  title={t('Inline Code', 'কোড')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <Code className="w-3.5 h-3.5" />
+                </button>
+                <span className="h-4 w-px bg-slate-300 dark:bg-slate-700 mx-0.5" />
+                <button
+                  type="button"
+                  onClick={() => insertLineOrBlock('- Bullet item')}
+                  title={t('Bullet List', 'বুলেট লিস্ট')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <List className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertLineOrBlock('1. Step description')}
+                  title={t('Numbered List', 'নাম্বারড লিস্ট')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <ListOrdered className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertLineOrBlock('- [ ] QA verification check')}
+                  title={t('Checklist', 'চেকলিস্ট')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-emerald-600 dark:text-emerald-400 cursor-pointer"
+                >
+                  <CheckSquare className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertLineOrBlock('> Business Policy Note: ')}
+                  title={t('Callout Quote', 'কোটেশন / নোট')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <Quote className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    insertLineOrBlock(
+                      '| Condition | Rule Formula | Expected Output |\n| --- | --- | --- |\n| Standard | {{=1000 * 0.9}} | 900 |\n| VIP | {{=SUM(1000, 200) * 0.85}} | 1020 |'
+                    )
+                  }
+                  title={t('Insert 3x3 Table', '৩×৩ টেবিল যুক্ত করুন')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <Table className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertLineOrBlock('---')}
+                  title={t('Page Divider', 'ডিভাইডার')}
+                  className="p-1.5 rounded-md hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+                <span className="h-4 w-px bg-slate-300 dark:bg-slate-700 mx-0.5" />
+                <button
+                  type="button"
+                  onClick={() => setShowFormulaBar((v) => !v)}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold cursor-pointer transition-colors ${
+                    showFormulaBar
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 border border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <Calculator className="w-3 h-3" />
+                  <span>fx {t('Formula', 'ফর্মুলা')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSymbolsBar((v) => !v)}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold cursor-pointer transition-colors ${
+                    showSymbolsBar
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <Sigma className="w-3 h-3" />
+                  <span>{t('Symbols', 'সিম্বল')}</span>
+                </button>
+              </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {editingDocId && (
+              {/* Editor View Mode */}
+              <div className="flex items-center gap-1 p-0.5 rounded-md bg-slate-200/75 dark:bg-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setDocEditorView('write')}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold cursor-pointer ${
+                    docEditorView === 'write'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  <PenLine className="w-3 h-3" />
+                  <span>{t('Write', 'লিখুন')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDocEditorView('split')}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold cursor-pointer ${
+                    docEditorView === 'split'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  <Columns2 className="w-3 h-3" />
+                  <span>{t('Split', 'স্প্লিট')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDocEditorView('preview')}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold cursor-pointer ${
+                    docEditorView === 'preview'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  <Eye className="w-3 h-3" />
+                  <span>{t('Word Page', 'ওয়ার্ড পেজ')}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Collapsible Math / Business Symbols Strip */}
+            {showSymbolsBar && (
+              <div className="flex flex-wrap items-center gap-1 pt-1.5 border-t border-slate-200/80 dark:border-slate-800">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mr-1">
+                  {t('Insert Symbol:', 'সিম্বল:')}
+                </span>
+                {DOC_SYMBOLS.map((sym) => (
+                  <button
+                    key={sym}
+                    type="button"
+                    onClick={() => insertLineOrBlock(sym, false)}
+                    className="w-6 h-6 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-800 dark:text-slate-100 hover:bg-amber-50 dark:hover:bg-amber-950/40 cursor-pointer"
+                  >
+                    {sym}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Collapsible MS Word / Google Sheets Style Formula Builder Bar */}
+            {showFormulaBar && (
+              <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-mono text-xs font-bold shrink-0">
+                    <span>fx</span>
+                    <span>=</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={formulaInput}
+                    onChange={(e) => setFormulaInput(e.target.value)}
+                    placeholder="SUM(1500, 250) * 0.9"
+                    className="flex-1 min-w-[200px] px-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs text-slate-900 dark:text-slate-100"
+                  />
+                  <div
+                    className={`px-2.5 py-1 rounded-md text-xs font-mono font-semibold border whitespace-nowrap ${
+                      liveFormulaEval.ok
+                        ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                        : 'border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300'
+                    }`}
+                  >
+                    {liveFormulaEval.ok
+                      ? `= ${liveFormulaEval.value}`
+                      : liveFormulaEval.error}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!liveFormulaEval.ok}
+                    onClick={handleInsertFormulaIntoDoc}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold cursor-pointer whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    {t('Insert Formula', 'ফর্মুলা বসাও')}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    {t('Functions:', 'ফাংশন:')}
+                  </span>
+                  {DOC_FORMULA_PRESETS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => setFormulaInput(preset.expr)}
+                      className="px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px] font-mono text-slate-700 dark:text-slate-300 hover:border-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 cursor-pointer"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 ml-auto">
+                    {t(
+                      'Supports +, -, *, /, ^, %, <, >, >=, <=, IF, SUM, AVG, PCT, ROUND, SQRT',
+                      '+, -, *, /, ^, %, IF, SUM, AVG, PCT, ROUND, SQRT সাপোর্ট করে'
+                    )}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Document Editor + Live MS Word Page Canvas */}
+          <div
+            className={`grid gap-3 ${
+              docEditorView === 'split' ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'
+            }`}
+          >
+            {docEditorView !== 'preview' && (
+              <textarea
+                ref={docTextareaRef}
+                rows={8}
+                value={docContent}
+                onChange={(e) => setDocContent(e.target.value)}
+                placeholder={t(
+                  'Write detailed business specs, tables, checklists, and live {{=SUM(100, 200)}} formulas...',
+                  'বিস্তারিত বিজনেস রুলস, টেবিল, চেকলিস্ট এবং {{=SUM(100, 200)}} ফর্মুলা লিখুন...'
+                )}
+                required
+                className="w-full px-3.5 py-2.5 text-xs font-mono leading-relaxed rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+              />
+            )}
+
+            {docEditorView !== 'write' && (
+              <div className="rounded-lg border border-slate-300/90 dark:border-slate-700 bg-slate-100/70 dark:bg-slate-950 p-3 max-h-[320px] overflow-y-auto">
+                <div className="rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 shadow-xs min-h-[180px] space-y-2">
+                  <div className="border-b border-slate-200 dark:border-slate-800 pb-2">
+                    <p className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
+                      {docSectionRef.trim() || 'Document Page Preview'}
+                    </p>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
+                      {docTitle.trim() || t('Untitled Business Document', 'শিরোনামহীন ডকুমেন্ট')}
+                    </h4>
+                  </div>
+                  {docContent.trim() ? (
+                    renderFormattedDocContent(docContent, [])
+                  ) : (
+                    <p className="text-xs text-slate-400 italic py-4">
+                      {t(
+                        'Live MS Word / Google Docs preview & calculated formula results appear here...',
+                        'এখানে লাইভ MS Word / Google Docs প্রিভিউ এবং ফর্মুলার ফলাফল দেখা যাবে...'
+                      )}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
+              <span>{wordCount} {t('words', 'শব্দ')}</span>
+              <span aria-hidden="true">·</span>
+              <span>{docContent.length} {t('chars', 'অক্ষর')}</span>
+              <span aria-hidden="true">·</span>
+              <span>{formulaCount} {t('formulas', 'ফর্মুলা')}</span>
               <button
                 type="button"
-                onClick={() => {
-                  setEditingDocId(null);
-                  setDocTitle('');
-                  setDocSectionRef('');
-                  setDocContent('');
-                  setDocMarkStatus('important');
-                }}
-                className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer"
+                onClick={handleInsertWordSpecTemplate}
+                className="text-amber-600 dark:text-amber-400 hover:underline font-sans font-semibold cursor-pointer"
               >
-                {t('Cancel Edit', 'বাতিল')}
+                + {t('Insert Spec Template', 'স্পেক টেমপ্লেট বসাও')}
               </button>
-            )}
-            <button
-              type="submit"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold cursor-pointer whitespace-nowrap"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              {editingDocId
-                ? t('Update Document', 'ডকুমেন্ট আপডেট করুন')
-                : t('Save Documentation', 'ডকুমেন্টেশন সেভ করুন')}
-            </button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {editingDocId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingDocId(null);
+                    setDocTitle('');
+                    setDocSectionRef('');
+                    setDocContent('');
+                    setDocMarkStatus('important');
+                  }}
+                  className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer"
+                >
+                  {t('Cancel Edit', 'বাতিল')}
+                </button>
+              )}
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {editingDocId
+                  ? t('Update Document', 'ডকুমেন্ট আপডেট করুন')
+                  : t('Save Documentation', 'ডকুমেন্টেশন সেভ করুন')}
+              </button>
+            </div>
           </div>
         </form>
 
@@ -815,8 +1688,40 @@ export const BusinessKnowledgePanels: React.FC<BusinessKnowledgePanelsProps> = (
                       </h4>
                     </div>
 
-                    {/* Markable & Card Highlight Controls */}
+                    {/* Markable, Word Export & Card Highlight Controls */}
                     <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleExportDocAsWord(doc)}
+                        title={t('Download as MS Word (.doc)', 'MS Word (.doc) ডাউনলোড')}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-blue-200 dark:border-blue-800/80 bg-blue-50/70 dark:bg-blue-950/30 text-[11px] font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100/80 dark:hover:bg-blue-900/40 cursor-pointer whitespace-nowrap"
+                      >
+                        <Download className="w-3 h-3" />
+                        <span>.doc</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCopyDocContent(doc)}
+                        title={t('Copy document text', 'ডকুমেন্ট কপি করুন')}
+                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                      >
+                        {copiedDocId === doc.id ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        ) : (
+                          <ClipboardCopy className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => window.print()}
+                        title={t('Print document', 'প্রিন্ট করুন')}
+                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                      </button>
+
                       <select
                         aria-label="Mark document status"
                         value={doc.markStatus}
@@ -892,12 +1797,16 @@ export const BusinessKnowledgePanels: React.FC<BusinessKnowledgePanelsProps> = (
                     </div>
                   </div>
 
-                  {/* Selectable Document Body with Inline <mark> Highlights */}
+                  {/* Formatted MS Word / Google Docs Paper Body with Live Formulas & Inline Highlights */}
                   <div
                     onMouseUp={() => handleCaptureSelectionForDoc(doc.id)}
-                    className="rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white/80 dark:bg-slate-950/70 p-4 text-xs sm:text-[13px] leading-relaxed text-slate-800 dark:text-slate-200 select-text"
+                    className="rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-950/80 p-5 select-text shadow-2xs"
                   >
-                    {renderHighlightedText(doc.content, doc.highlights)}
+                    {renderFormattedDocContent(
+                      doc.content,
+                      doc.highlights,
+                      (lineIdx) => handleToggleChecklistInDoc(doc.id, lineIdx)
+                    )}
                   </div>
 
                   {/* Inline Text Highlighter Bar */}

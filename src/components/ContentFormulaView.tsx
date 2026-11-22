@@ -51,13 +51,54 @@ const OPERATOR_LABELS: Record<ContentMatchOperator, { en: string; bn: string }> 
   max_length: { en: 'Max Characters', bn: 'সর্বোচ্চ অক্ষর সীমা' },
 };
 
+function flattenJsonLeaves(
+  value: unknown,
+  prefix = ''
+): Array<{ path: string; rawValue: string; numericValue: number | null }> {
+  const out: Array<{ path: string; rawValue: string; numericValue: number | null }> = [];
+  if (value === null || value === undefined) {
+    if (prefix) out.push({ path: prefix, rawValue: String(value), numericValue: null });
+    return out;
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    const rawStr = String(value);
+    const parsedNum =
+      typeof value === 'number'
+        ? value
+        : /^-?[\d,]+(\.\d+)?$/.test(rawStr.trim())
+          ? Number(rawStr.replace(/,/g, ''))
+          : null;
+    out.push({
+      path: prefix || 'value',
+      rawValue: rawStr,
+      numericValue: parsedNum !== null && Number.isFinite(parsedNum) ? parsedNum : null,
+    });
+    return out;
+  }
+  if (Array.isArray(value)) {
+    value.slice(0, 25).forEach((item, idx) => {
+      out.push(...flattenJsonLeaves(item, `${prefix}[${idx}]`));
+    });
+    return out;
+  }
+  if (typeof value === 'object') {
+    Object.entries(value as Record<string, unknown>)
+      .slice(0, 40)
+      .forEach(([k, v]) => {
+        const nextKey = prefix ? `${prefix}.${k}` : k;
+        out.push(...flattenJsonLeaves(v, nextKey));
+      });
+  }
+  return out;
+}
+
 export const ContentFormulaView: React.FC<ContentFormulaViewProps> = ({
   project,
   lang,
   onUpdateProject,
   onNotify,
 }) => {
-  const [subTab, setSubTab] = useState<'formulas' | 'content' | 'scanner'>('formulas');
+  const [subTab, setSubTab] = useState<'formulas' | 'content' | 'scanner' | 'parity'>('formulas');
   const [fetchingLive, setFetchingLive] = useState(false);
 
   const contentAssertions: ContentAssertionRule[] = useMemo(
@@ -130,6 +171,107 @@ export const ContentFormulaView: React.FC<ContentFormulaViewProps> = ({
     'Order Summary\nSubtotal: ৳ 1,500.00\nDiscount (10%): -৳ 150.00\nVAT: ৳ 75.00\nNet Payable: ৳ 1,425.00\nStatus: Pending Review'
   );
   const [exportLang, setExportLang] = useState<'pytest-py' | 'playwright-ts'>('pytest-py');
+
+  // API JSON <-> UI Parity Checker State
+  const [parityJsonText, setParityJsonText] = useState(
+    '{\n  "orderRef": "INV-9042",\n  "subtotal": 1500,\n  "discount": 150,\n  "vat": 75,\n  "netPayable": 1425,\n  "status": "Pending Review"\n}'
+  );
+  const [parityUiText, setParityUiText] = useState(
+    'Invoice INV-9042\nSubtotal: ৳ 1,500.00\nDiscount: -৳ 150.00\nVAT: ৳ 75.00\nNet Payable: ৳ 1,425.00\nStatus: Pending Review'
+  );
+
+  const parityReport = useMemo(() => {
+    try {
+      const parsed = JSON.parse(parityJsonText);
+      const leaves = flattenJsonLeaves(parsed);
+      const uiNormalized = parityUiText.toLowerCase();
+      const uiNumbers = parityUiText
+        .replace(/,/g, '')
+        .match(/-?\d+(?:\.\d+)?/g)
+        ?.map((n) => Number(n))
+        .filter((n) => Number.isFinite(n)) || [];
+
+      const rows = leaves.map((leaf) => {
+        const needle = leaf.rawValue.trim().toLowerCase();
+        const exactTextMatch = needle.length > 0 && uiNormalized.includes(needle);
+        const numericMatch =
+          leaf.numericValue !== null &&
+          uiNumbers.some((u) => Math.abs(u - (leaf.numericValue as number)) <= 0.01);
+        const matched = exactTextMatch || numericMatch;
+        return {
+          ...leaf,
+          matched,
+          matchKind: exactTextMatch ? 'text' : numericMatch ? 'numeric' : 'missing',
+        };
+      });
+
+      return {
+        validJson: true,
+        error: '',
+        rows,
+        matchedCount: rows.filter((r) => r.matched).length,
+      };
+    } catch (err) {
+      return {
+        validJson: false,
+        error: err instanceof Error ? err.message : 'Invalid JSON',
+        rows: [] as Array<{
+          path: string;
+          rawValue: string;
+          numericValue: number | null;
+          matched: boolean;
+          matchKind: string;
+        }>,
+        matchedCount: 0,
+      };
+    }
+  }, [parityJsonText, parityUiText]);
+
+  const handleFetchUiForParity = async () => {
+    if (!isChromeExtensionContext()) {
+      onNotify?.(
+        pickLang(
+          lang,
+          'In Web Preview mode, paste visible UI/invoice text on the right to compare against JSON.',
+          'ওয়েব প্রিভিউ মোডে ডান পাশের বক্সে পেজের লেখা পেস্ট করে JSON-এর সাথে মিলান।'
+        )
+      );
+      return;
+    }
+    setFetchingLive(true);
+    const res = await readActiveTabContent(['PAGE_BODY']);
+    setFetchingLive(false);
+    if (res.ok && res.pageBodySample !== undefined) {
+      setParityUiText(res.pageBodySample);
+      onNotify?.(`Loaded visible UI text from ${res.pageTitle || 'active tab'}.`);
+    } else {
+      onNotify?.(res.error || 'Could not read active tab text.');
+    }
+  };
+
+  const handleSaveParityAsContentRule = (path: string, rawValue: string) => {
+    const created: ContentAssertionRule = {
+      id: `cnt_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      name: `API Parity: ${path}`,
+      selector: 'PAGE_BODY',
+      operator: 'contains',
+      expectedText: rawValue,
+      sampleInputText: parityUiText.slice(0, 600),
+      caseSensitive: false,
+      status: 'untested',
+    };
+    onUpdateProject({
+      ...project,
+      contentAssertions: [...contentAssertions, created],
+    });
+    onNotify?.(
+      pickLang(
+        lang,
+        `Saved "${path}" as a Content Assertion rule.`,
+        `"${path}" কন্টেন্ট চেক রুল হিসেবে সেভ হয়েছে।`
+      )
+    );
+  };
 
   const scanReport = useMemo(
     () => scanTextForContentBugs(scannerText),
@@ -609,6 +751,18 @@ export const ContentFormulaView: React.FC<ContentFormulaViewProps> = ({
             >
               <FileSearch className="w-3.5 h-3.5" />
               {pickLang(lang, 'Scan & Test Code', 'স্ক্যান ও টেস্ট কোড')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSubTab('parity')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
+                subTab === 'parity'
+                  ? 'bg-white dark:bg-slate-900 text-fuchsia-700 dark:text-fuchsia-300 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {pickLang(lang, 'API JSON ↔ UI Parity', 'API JSON বনাম UI মিল')}
             </button>
           </div>
         </div>
@@ -1411,6 +1565,131 @@ export const ContentFormulaView: React.FC<ContentFormulaViewProps> = ({
             <pre className="p-3.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-mono text-fuchsia-200 overflow-x-auto max-h-[390px] leading-relaxed">
               {generatedCode}
             </pre>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: API JSON <-> UI PARITY CHECKER */}
+      {subTab === 'parity' && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2.5 shadow-xs">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  {pickLang(lang, '1. Paste Backend API JSON Response', '১. API JSON রেসপন্স পেস্ট করুন')}
+                </h3>
+                <span className="text-[11px] font-mono text-slate-400">
+                  {parityReport.validJson
+                    ? `${parityReport.rows.length} fields`
+                    : 'Invalid JSON'}
+                </span>
+              </div>
+              <textarea
+                rows={9}
+                value={parityJsonText}
+                onChange={(e) => setParityJsonText(e.target.value)}
+                placeholder='{"total": 1425, "status": "Paid"}'
+                className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-mono text-slate-900 dark:text-slate-100"
+              />
+              {!parityReport.validJson && (
+                <p className="text-xs text-rose-600 dark:text-rose-400 font-mono">
+                  {parityReport.error}
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2.5 shadow-xs">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  {pickLang(lang, '2. Rendered UI / Invoice Text', '২. স্ক্রিনে দেখানো UI টেক্সট')}
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleFetchUiForParity}
+                  disabled={fetchingLive}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold cursor-pointer whitespace-nowrap"
+                >
+                  <Globe className="w-3 h-3" />
+                  {pickLang(lang, 'Fetch Live Tab', 'লাইভ ট্যাব আনুন')}
+                </button>
+              </div>
+              <textarea
+                rows={9}
+                value={parityUiText}
+                onChange={(e) => setParityUiText(e.target.value)}
+                placeholder="Paste visible invoice, table, or checkout UI text here..."
+                className="w-full p-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-mono text-slate-900 dark:text-slate-100"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                {pickLang(
+                  lang,
+                  `Parity Results: ${parityReport.matchedCount}/${parityReport.rows.length} API fields found on UI`,
+                  `ফলাফল: ${parityReport.rows.length}টির মধ্যে ${parityReport.matchedCount}টি API মান স্ক্রিনে মিলেছে`
+                )}
+              </div>
+              <span className="text-[11px] text-slate-500">
+                {pickLang(
+                  lang,
+                  'Supports comma-formatted currency matching (e.g. 1500 == 1,500.00)',
+                  'কমা বা দশমিক ফরম্যাট (যেমন 1500 == 1,500.00) স্বয়ংক্রিয়ভাবে ম্যাচ করে'
+                )}
+              </span>
+            </div>
+
+            {parityReport.rows.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 text-slate-500 font-medium">
+                      <th className="py-2.5 px-4">JSON Field Path</th>
+                      <th className="py-2.5 px-4">API Value</th>
+                      <th className="py-2.5 px-4">UI Parity</th>
+                      <th className="py-2.5 px-4 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                    {parityReport.rows.map((row) => (
+                      <tr key={row.path} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
+                        <td className="py-2.5 px-4 font-mono text-slate-700 dark:text-slate-300">
+                          {row.path}
+                        </td>
+                        <td className="py-2.5 px-4 font-mono font-semibold text-slate-900 dark:text-slate-100">
+                          {row.rawValue}
+                        </td>
+                        <td className="py-2.5 px-4">
+                          {row.matched ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-semibold">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              {row.matchKind === 'numeric' ? 'Matched (Numeric)' : 'Matched'}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-rose-700 dark:text-rose-400 font-semibold">
+                              <XCircle className="w-3.5 h-3.5" />
+                              Missing in UI
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveParityAsContentRule(row.path, row.rawValue)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-fuchsia-200 dark:border-fuchsia-900 text-fuchsia-700 dark:text-fuchsia-300 hover:bg-fuchsia-50 dark:hover:bg-fuchsia-950/40 text-[11px] font-semibold cursor-pointer whitespace-nowrap"
+                          >
+                            <Plus className="w-3 h-3" />
+                            {pickLang(lang, 'Save Rule', 'রুল সেভ')}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

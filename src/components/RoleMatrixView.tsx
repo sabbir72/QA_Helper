@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowLeftRight,
   ArrowRight,
   Check,
   CheckCircle2,
@@ -88,10 +89,12 @@ export const RoleMatrixView: React.FC<RoleMatrixViewProps> = ({
   onUpdateProject,
   onNotify,
 }) => {
-  const [activeTab, setActiveTab] = useState<'chain' | 'matrix' | 'security'>('security');
+  const [activeTab, setActiveTab] = useState<'chain' | 'matrix' | 'security' | 'xray'>('security');
   const [viewMode, setViewMode] = useState<'matrix' | 'table'>('matrix');
   const [roleFilter, setRoleFilter] = useState<string>('All');
   const [showAddForm, setShowAddForm] = useState(false);
+  const [diffRoleA, setDiffRoleA] = useState<string>('');
+  const [diffRoleB, setDiffRoleB] = useState<string>('');
 
   // Role Framework Registry (merged from customRoles, rbacRules, approvalChain, customTestRules)
   const customTestRules: CustomTestRuleSuite[] = useMemo(
@@ -1403,6 +1406,18 @@ export const RoleMatrixView: React.FC<RoleMatrixViewProps> = ({
               <GitMerge className="w-3.5 h-3.5" />
               {pickLang(lang, 'Approval Chain Diagram', 'অ্যাপ্রুভাল চেইন ডায়াগ্রাম')}
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('xray')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
+                activeTab === 'xray'
+                  ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {pickLang(lang, 'Role X-Ray & Diff', 'রোল এক্স-রে ও তুলনা')}
+            </button>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -2710,6 +2725,443 @@ export const RoleMatrixView: React.FC<RoleMatrixViewProps> = ({
           )}
         </div>
       )}
+
+      {/* TAB: ROLE X-RAY UI SIMULATOR & SIDE-BY-SIDE DIFF */}
+      {activeTab === 'xray' && (() => {
+        const selectedRole = effectiveActiveRole || uniqueRoles[0] || '';
+        const resolvedRoleA =
+          diffRoleA && uniqueRoles.includes(diffRoleA)
+            ? diffRoleA
+            : uniqueRoles[0] || '';
+        const resolvedRoleB =
+          diffRoleB && uniqueRoles.includes(diffRoleB)
+            ? diffRoleB
+            : uniqueRoles[1] || uniqueRoles[0] || '';
+
+        const allRoleCapabilities: Array<{
+          key: string;
+          label: string;
+          selector: string;
+          role: string;
+          expected: DomVisibilityExpectation;
+          observed: DomObservedState;
+          source: string;
+        }> = [
+          ...project.rbacRules.map((r) => ({
+            key: `m_${r.id}`,
+            label: r.feature,
+            selector: r.selector,
+            role: r.role,
+            expected: r.expected,
+            observed: r.observed,
+            source: 'Matrix',
+          })),
+          ...customTestRules.flatMap((suite) =>
+            suite.items.map((it) => ({
+              key: `c_${suite.id}_${it.id}`,
+              label: `${suite.ruleName}: ${it.targetElement}`,
+              selector: it.targetElement,
+              role: it.role,
+              expected: it.expected,
+              observed: 'not_checked' as DomObservedState,
+              source: suite.ruleName,
+            }))
+          ),
+        ];
+
+        const activeCapabilities = allRoleCapabilities.filter(
+          (c) => c.role.toLowerCase() === selectedRole.toLowerCase()
+        );
+        const visibleCaps = activeCapabilities.filter((c) => c.expected === 'visible');
+        const disabledCaps = activeCapabilities.filter((c) => c.expected === 'disabled');
+        const hiddenCaps = activeCapabilities.filter((c) => c.expected === 'hidden');
+
+        const stageParticipation = approvalChain
+          .map((st, idx) => ({ st, order: idx + 1 }))
+          .filter(
+            ({ st }) => st.role.toLowerCase() === selectedRole.toLowerCase()
+          );
+
+        const uniqueCompareTargets = Array.from(
+          new Map(
+            allRoleCapabilities.map((c) => [
+              c.selector.toLowerCase(),
+              { selector: c.selector, label: c.label },
+            ])
+          ).values()
+        );
+
+        const securityScore =
+          stats.total === 0
+            ? 100
+            : Math.max(
+                0,
+                Math.round(((stats.total - stats.mismatches) / stats.total) * 100)
+              );
+
+        return (
+          <div className="space-y-5">
+            {/* Role X-Ray Live App Simulator */}
+            <div className="rounded-xl border border-emerald-200/80 dark:border-emerald-900/60 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    {pickLang(
+                      lang,
+                      'Role UI X-Ray Simulator',
+                      'রোল UI এক্স-রে সিমুলেটর'
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {pickLang(
+                      lang,
+                      'Preview exactly what buttons, read-only locks, and hidden elements a logged-in role sees on screen.',
+                      'নির্বাচিত রোল লগইন করলে স্ক্রিনে কোন বাটন চালু, কোনটি লক এবং কোনটি সম্পূর্ণ লুকানো থাকবে তা সরাসরি দেখুন।'
+                    )}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-mono">
+                    {pickLang(lang, 'Security Integrity:', 'নিরাপত্তা স্কোর:')}{' '}
+                    <strong
+                      className={
+                        securityScore >= 90
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : securityScore >= 70
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-rose-600 dark:text-rose-400'
+                      }
+                    >
+                      {securityScore}%
+                    </strong>
+                  </div>
+
+                  <select
+                    aria-label="Select role for X-Ray"
+                    value={selectedRole}
+                    onChange={(e) => setActiveTestRole(e.target.value)}
+                    className="px-3 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50/70 dark:bg-emerald-950/40 text-xs font-semibold text-emerald-900 dark:text-emerald-200"
+                  >
+                    {uniqueRoles.length === 0 ? (
+                      <option value="">
+                        {pickLang(lang, 'No roles yet', 'কোনো রোল নেই')}
+                      </option>
+                    ) : (
+                      uniqueRoles.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              {selectedRole ? (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950 p-4 space-y-4">
+                  {/* Simulated Session Banner */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                      <span className="font-semibold text-slate-900 dark:text-slate-100">
+                        {pickLang(lang, 'Simulated Session:', 'সিমুলেটেড সেশন:')} {selectedRole}
+                      </span>
+                      <span className="text-slate-400 font-mono text-[11px]">
+                        ({activeCapabilities.length} {pickLang(lang, 'rules mapped', 'টি রুল')})
+                      </span>
+                    </div>
+
+                    {stageParticipation.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {stageParticipation.map(({ st, order }) => (
+                          <span
+                            key={st.id}
+                            className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-[11px] font-medium text-indigo-700 dark:text-indigo-300"
+                          >
+                            {pickLang(lang, 'Stage', 'ধাপ')} {order}: {st.stepLabel}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {activeCapabilities.length === 0 ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400 py-4 text-center">
+                      {pickLang(
+                        lang,
+                        `No matrix or custom rules linked to "${selectedRole}" yet.`,
+                        `"${selectedRole}" রোলের জন্য এখনো কোনো রুল যুক্ত করা হয়নি।`
+                      )}
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* Bucket 1: Visible & Active */}
+                      <div className="rounded-lg border border-emerald-200 dark:border-emerald-900/70 bg-white dark:bg-slate-900 p-3 space-y-2.5">
+                        <div className="flex items-center justify-between text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                          <span className="inline-flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            {pickLang(lang, 'Can Use (Visible)', 'ব্যবহারযোগ্য (Visible)')}
+                          </span>
+                          <span className="font-mono">{visibleCaps.length}</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {visibleCaps.map((cap) => (
+                            <button
+                              key={cap.key}
+                              type="button"
+                              onClick={() =>
+                                onNotify?.(
+                                  `[${selectedRole}] Simulated click on "${cap.label}" (${cap.selector})`
+                                )
+                              }
+                              className="w-full text-left px-2.5 py-2 rounded-md border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100/80 dark:hover:bg-emerald-900/40 transition-colors cursor-pointer"
+                            >
+                              <div className="text-xs font-semibold text-emerald-900 dark:text-emerald-100 truncate">
+                                {cap.label}
+                              </div>
+                              <div className="text-[10px] font-mono text-emerald-700/80 dark:text-emerald-300/80 truncate">
+                                {cap.selector}
+                              </div>
+                            </button>
+                          ))}
+                          {visibleCaps.length === 0 && (
+                            <p className="text-[11px] text-slate-400 italic">
+                              {pickLang(lang, 'None', 'কিছু নেই')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bucket 2: Read-Only / Disabled */}
+                      <div className="rounded-lg border border-amber-200 dark:border-amber-900/70 bg-white dark:bg-slate-900 p-3 space-y-2.5">
+                        <div className="flex items-center justify-between text-xs font-bold text-amber-700 dark:text-amber-300">
+                          <span className="inline-flex items-center gap-1.5">
+                            <Lock className="w-3.5 h-3.5" />
+                            {pickLang(lang, 'Locked (Disabled)', 'লকড (Read-Only)')}
+                          </span>
+                          <span className="font-mono">{disabledCaps.length}</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {disabledCaps.map((cap) => (
+                            <div
+                              key={cap.key}
+                              className="px-2.5 py-2 rounded-md border border-amber-200 dark:border-amber-800/70 bg-amber-50/50 dark:bg-amber-950/20 opacity-80"
+                            >
+                              <div className="text-xs font-semibold text-amber-900 dark:text-amber-200 truncate">
+                                {cap.label}
+                              </div>
+                              <div className="text-[10px] font-mono text-amber-700/80 dark:text-amber-300/70 truncate">
+                                {cap.selector}
+                              </div>
+                            </div>
+                          ))}
+                          {disabledCaps.length === 0 && (
+                            <p className="text-[11px] text-slate-400 italic">
+                              {pickLang(lang, 'None', 'কিছু নেই')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bucket 3: Hidden from DOM */}
+                      <div className="rounded-lg border border-rose-200 dark:border-rose-900/70 bg-white dark:bg-slate-900 p-3 space-y-2.5">
+                        <div className="flex items-center justify-between text-xs font-bold text-rose-700 dark:text-rose-300">
+                          <span className="inline-flex items-center gap-1.5">
+                            <EyeOff className="w-3.5 h-3.5" />
+                            {pickLang(lang, 'Hidden (No DOM)', 'সম্পূর্ণ লুকানো (Hidden)')}
+                          </span>
+                          <span className="font-mono">{hiddenCaps.length}</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {hiddenCaps.map((cap) => (
+                            <div
+                              key={cap.key}
+                              className="px-2.5 py-2 rounded-md border border-dashed border-rose-300 dark:border-rose-800 bg-rose-50/40 dark:bg-rose-950/20"
+                            >
+                              <div className="text-xs font-semibold text-rose-800 dark:text-rose-200 line-through truncate">
+                                {cap.label}
+                              </div>
+                              <div className="text-[10px] font-mono text-rose-600/80 dark:text-rose-300/80 truncate">
+                                {cap.selector}
+                              </div>
+                            </div>
+                          ))}
+                          {hiddenCaps.length === 0 && (
+                            <p className="text-[11px] text-slate-400 italic">
+                              {pickLang(lang, 'None', 'কিছু নেই')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            {/* Side-by-Side Role Comparator (Diff View) */}
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <ArrowLeftRight className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    {pickLang(
+                      lang,
+                      'Side-by-Side Role Permission Diff',
+                      'দুটি রোলের পারমিশন তুলনা (Diff)'
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {pickLang(
+                      lang,
+                      'Compare any two roles immediately to catch missing restrictions or privilege escalation bugs.',
+                      'যেকোনো দুটি রোলের মধ্যে পারমিশনের পার্থক্য দেখে সিকিউরিটি ফাঁকফোকর দ্রুত ধরুন।'
+                    )}
+                  </p>
+                </div>
+
+                {uniqueRoles.length >= 2 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      aria-label="Compare Role A"
+                      value={resolvedRoleA}
+                      onChange={(e) => setDiffRoleA(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-semibold text-slate-900 dark:text-slate-100"
+                    >
+                      {uniqueRoles.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-xs font-bold text-slate-400">vs</span>
+                    <select
+                      aria-label="Compare Role B"
+                      value={resolvedRoleB}
+                      onChange={(e) => setDiffRoleB(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-semibold text-slate-900 dark:text-slate-100"
+                    >
+                      {uniqueRoles.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {uniqueCompareTargets.length === 0 ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400 text-center py-6">
+                  {pickLang(
+                    lang,
+                    'Add rules in Permission Matrix or Custom Test Rules to compare roles.',
+                    'তুলনা করতে পারমিশন ম্যাট্রিক্স বা কাস্টম রুলে অন্তত একটি নিয়ম যোগ করুন।'
+                  )}
+                </p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
+                        <th className="py-2.5 px-3">Feature / Locator</th>
+                        <th className="py-2.5 px-3">{resolvedRoleA || 'Role A'}</th>
+                        <th className="py-2.5 px-3">{resolvedRoleB || 'Role B'}</th>
+                        <th className="py-2.5 px-3">Diff Verdict</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {uniqueCompareTargets.map((target) => {
+                        const matchA = allRoleCapabilities.find(
+                          (c) =>
+                            c.selector.toLowerCase() === target.selector.toLowerCase() &&
+                            c.role.toLowerCase() === resolvedRoleA.toLowerCase()
+                        );
+                        const matchB = allRoleCapabilities.find(
+                          (c) =>
+                            c.selector.toLowerCase() === target.selector.toLowerCase() &&
+                            c.role.toLowerCase() === resolvedRoleB.toLowerCase()
+                        );
+                        const expA = matchA?.expected;
+                        const expB = matchB?.expected;
+                        const isDifferent = expA !== expB;
+
+                        return (
+                          <tr
+                            key={target.selector}
+                            className={
+                              isDifferent
+                                ? 'bg-amber-50/40 dark:bg-amber-950/15'
+                                : 'bg-white dark:bg-slate-900'
+                            }
+                          >
+                            <td className="py-2.5 px-3">
+                              <div className="font-semibold text-slate-900 dark:text-slate-100">
+                                {target.label}
+                              </div>
+                              <div className="font-mono text-[10px] text-slate-400">
+                                {target.selector}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 font-medium">
+                              {expA ? (
+                                <span
+                                  className={
+                                    expA === 'visible'
+                                      ? 'text-emerald-700 dark:text-emerald-400'
+                                      : expA === 'disabled'
+                                        ? 'text-amber-700 dark:text-amber-400'
+                                        : 'text-rose-700 dark:text-rose-400'
+                                  }
+                                >
+                                  {HUMAN_ACCESS_LABEL[expA]}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 font-medium">
+                              {expB ? (
+                                <span
+                                  className={
+                                    expB === 'visible'
+                                      ? 'text-emerald-700 dark:text-emerald-400'
+                                      : expB === 'disabled'
+                                        ? 'text-amber-700 dark:text-amber-400'
+                                        : 'text-rose-700 dark:text-rose-400'
+                                  }
+                                >
+                                  {HUMAN_ACCESS_LABEL[expB]}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              {isDifferent ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  {pickLang(lang, 'Changed Access', 'ভিন্ন অ্যাক্সেস')}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-slate-400">
+                                  {pickLang(lang, 'Identical', 'একই')}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Shared datalist for role autocomplete */}
       <datalist id="veripulse-framework-roles">

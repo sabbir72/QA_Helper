@@ -348,6 +348,96 @@ export interface QaTestCase {
   updatedAt: string;
 }
 
+export interface SavedGpsLocation {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  altitude?: number | null;
+  heading?: number | null;
+  speed?: number | null;
+  note?: string;
+  createdAt: string;
+}
+
+export interface FakeGpsConfig {
+  enabled: boolean;
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  altitude: number | null;
+  heading: number | null;
+  speed: number | null;
+  locationLabel: string;
+  simulateMovement: boolean;
+  routeEndLat: number;
+  routeEndLng: number;
+  routeIntervalSec: number;
+  showFloatingBadge: boolean;
+  updatedAt: string;
+}
+
+export type ScannedFieldType =
+  | 'text'
+  | 'email'
+  | 'phone'
+  | 'password'
+  | 'number'
+  | 'date'
+  | 'select'
+  | 'textarea'
+  | 'checkbox'
+  | 'radio'
+  | 'url'
+  | 'search';
+
+export interface ScannedFormField {
+  id: string;
+  label: string;
+  name: string;
+  selector: string;
+  fieldType: ScannedFieldType;
+  required?: boolean;
+  placeholder?: string;
+  options?: string[];
+  currentValue?: string;
+  generatedValue: string;
+  edgeCaseValue?: string;
+  rationale?: string;
+  isSensitive?: boolean;
+}
+
+export type WebsiteTestCategory =
+  | 'Functional Flow'
+  | 'Form & Validation'
+  | 'Auth & Security'
+  | 'UI & Responsive'
+  | 'Business Logic'
+  | 'API & Performance';
+
+export interface WebsiteTestRecommendation {
+  id: string;
+  title: string;
+  category: WebsiteTestCategory;
+  priority: 'P0' | 'P1' | 'P2';
+  whyImportant: string;
+  howToTest: string;
+  expectedResult: string;
+  targetArea?: string;
+  checked?: boolean;
+}
+
+export interface SmartScreenAnalysisResult {
+  pageTitle: string;
+  pageUrl: string;
+  appType: string;
+  summary: string;
+  detectedFields: ScannedFormField[];
+  majorTests: WebsiteTestRecommendation[];
+  analyzedAt: string;
+}
+
 export interface ProjectWorkspace {
   id: string;
   name: string;
@@ -372,6 +462,8 @@ export interface ProjectWorkspace {
   notices?: QaNotice[];
   approvalChain?: ApprovalChainStage[];
   approvalSketches?: SketchStroke[];
+  savedGpsLocations?: SavedGpsLocation[];
+  smartScanResult?: SmartScreenAnalysisResult | null;
 }
 
 export interface WorkspaceSettings {
@@ -403,6 +495,7 @@ export type RecycleBinCategory =
   | 'qa_notice'
   | 'self_alert'
   | 'recorded_steps'
+  | 'fake_gps_profile'
   | 'workspace_snapshot';
 
 export interface RecycleBinItem {
@@ -447,5 +540,29 @@ export interface SelfAlert {
   triggerAt: number;
   status: 'scheduled' | 'triggered';
   createdAt: string;
+}
+
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  createdAt?: string;
+}
+
+export interface CloudSyncSession {
+  user: AuthUser | null;
+  serverUrl: string;
+  bearerToken: string;
+  lastSyncedAt: string | null;
+}
+
+export interface UserSyncBundle {
+  workspace: WorkspaceState;
+  fakeGps: FakeGpsConfig;
+  alerts: SelfAlert[];
+  lastScan: CoverageScanResult;
+  recording: RecordingState;
+  inspected: InspectedElement | null;
+  updatedAt?: string;
 }
 

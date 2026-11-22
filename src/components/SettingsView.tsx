@@ -1,11 +1,28 @@
 import React, { useState } from 'react';
-import { Camera, Download, RotateCcw, Settings, Upload } from 'lucide-react';
-import { WorkspaceState } from '../types/flowguard';
+import {
+  Camera,
+  Cloud,
+  Download,
+  Lock,
+  RotateCcw,
+  Settings,
+  Upload,
+  UserCheck,
+} from 'lucide-react';
+import { pickLang } from '../i18n/translations';
+import {
+  AppLanguage,
+  CloudSyncSession,
+  WorkspaceState,
+} from '../types/flowguard';
 import { requestVisibleTabScreenshot } from '../utils/extensionBridge';
 
 interface SettingsViewProps {
   workspace: WorkspaceState;
   theme: 'light' | 'dark';
+  lang?: AppLanguage;
+  session?: CloudSyncSession;
+  onOpenAccountModal?: () => void;
   onToggleTheme: () => void;
   onUpdateWorkspace: (next: WorkspaceState) => void;
   onResetWorkspace: () => void;
@@ -14,6 +31,9 @@ interface SettingsViewProps {
 export const SettingsView: React.FC<SettingsViewProps> = ({
   workspace,
   theme,
+  lang = 'en',
+  session,
+  onOpenAccountModal,
   onToggleTheme,
   onUpdateWorkspace,
   onResetWorkspace,
@@ -86,13 +106,70 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
         <div className="space-y-0.5">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            VeriPulse Preferences &amp; Privacy
+            {pickLang(
+              lang,
+              'VeriPulse Preferences, Account & Privacy',
+              'VeriPulse সেটিংস, অ্যাকাউন্ট ও প্রাইভেসি'
+            )}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Customize appearance, privacy masking rules, optional bug screenshots, and local JSON backups.
+            {pickLang(
+              lang,
+              'Manage per-user isolated cloud sync, Chrome Extension pairing, appearance, secret masking, and JSON backups.',
+              'আলাদা ইউজার অ্যাকাউন্ট সিঙ্ক, ক্রোম এক্সটেনশন পেয়ারিং, থিম ও লোকাল ব্যাকআপ নিয়ন্ত্রণ করুন।'
+            )}
           </p>
         </div>
       </div>
+
+      {/* Per-User Account Isolation & Extension Sync Banner */}
+      {onOpenAccountModal && (
+        <div className="rounded-xl border border-emerald-200/80 dark:border-emerald-900/60 bg-white dark:bg-slate-900 p-5 shadow-xs flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+              {session?.user ? (
+                <UserCheck className="w-5 h-5" />
+              ) : (
+                <Lock className="w-5 h-5" />
+              )}
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {session?.user
+                  ? `${session.user.name} (${session.user.email})`
+                  : pickLang(
+                      lang,
+                      'Zero-Data Isolated Account Not Connected',
+                      'এখনো অ্যাকাউন্ট লগইন করা হয়নি (গেস্ট সেশন)'
+                    )}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {session?.user
+                  ? pickLang(
+                      lang,
+                      'Your workspace is stored exclusively under your user account and synced with your paired Chrome Extension.',
+                      'আপনার ডাটা শুধু আপনার অ্যাকাউন্টে সংরক্ষিত আছে এবং পেয়ার করা ক্রোম এক্সটেনশনের সাথে অটো-সিঙ্ক হচ্ছে।'
+                    )
+                  : pickLang(
+                      lang,
+                      'Create a new account to start from zero data and keep your saved flows/GPS profiles 100% isolated from other users.',
+                      'নতুন অ্যাকাউন্ট খুললে ০ ডাটা দিয়ে শুরু হবে এবং আপনার সেভ করা ডাটা কখনোই অন্য ইউজারের কাছে যাবে না।'
+                    )}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenAccountModal}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-teal-600 text-white text-xs font-semibold cursor-pointer whitespace-nowrap"
+          >
+            <Cloud className="w-3.5 h-3.5" />
+            {session?.user
+              ? pickLang(lang, 'Manage Account & Sync', 'অ্যাকাউন্ট ও সিঙ্ক')
+              : pickLang(lang, 'Sign In / Create Account', 'সাইন ইন / অ্যাকাউন্ট')}
+          </button>
+        </div>
+      )}
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 divide-y divide-slate-200 dark:divide-slate-800 shadow-xs">
         {/* Theme */}
