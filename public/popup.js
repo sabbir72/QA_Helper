@@ -8,6 +8,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const scanBtn = document.getElementById('scan-cov-btn');
   const autoFillBtn = document.getElementById('autofill-screen-btn');
   const smartSiteQaBtn = document.getElementById('smart-site-qa-btn');
+  const mhCardTitle = document.getElementById('mh-card-title');
+  const openManualHelperBtn = document.getElementById('open-manual-helper-btn');
+  const mhRevealPwBtn = document.getElementById('mh-reveal-pw-btn');
+  const mhUnlockPasteBtn = document.getElementById('mh-unlock-paste-btn');
+  const mhBypassHtml5Btn = document.getElementById('mh-bypass-html5-btn');
+  const mhUiGlitchBtn = document.getElementById('mh-ui-glitch-btn');
+  const mhClearStorageBtn = document.getElementById('mh-clear-storage-btn');
   const openDashBtn = document.getElementById('open-dash-btn');
   const openSidePanelBtn = document.getElementById('open-sidepanel-btn');
   const openSettingsBtn = document.getElementById('open-settings-btn');
@@ -128,6 +135,34 @@ document.addEventListener('DOMContentLoaded', () => {
     if (smartSiteQaBtn) {
       smartSiteQaBtn.textContent =
         currentLang === 'bn' ? 'সাইট টেস্ট প্ল্যান' : 'Site Test Plan';
+    }
+    if (mhCardTitle) {
+      mhCardTitle.textContent =
+        currentLang === 'bn' ? 'ম্যানুয়াল হেল্প-হ্যান্ড' : 'Manual Help-Hands';
+    }
+    if (openManualHelperBtn) {
+      openManualHelperBtn.textContent =
+        currentLang === 'bn' ? 'ডাটা ও ফাইল →' : 'Data & Files →';
+    }
+    if (mhRevealPwBtn) {
+      mhRevealPwBtn.textContent =
+        currentLang === 'bn' ? 'পাসওয়ার্ড দেখুন' : 'Reveal Passwords';
+    }
+    if (mhUnlockPasteBtn) {
+      mhUnlockPasteBtn.textContent =
+        currentLang === 'bn' ? 'পেস্ট আনলক' : 'Unlock Paste';
+    }
+    if (mhBypassHtml5Btn) {
+      mhBypassHtml5Btn.textContent =
+        currentLang === 'bn' ? 'HTML5 বাইপাস' : 'Bypass HTML5';
+    }
+    if (mhUiGlitchBtn) {
+      mhUiGlitchBtn.textContent =
+        currentLang === 'bn' ? 'ইমেজ ও ওভারফ্লো' : 'Img & Overflow';
+    }
+    if (mhClearStorageBtn) {
+      mhClearStorageBtn.textContent =
+        currentLang === 'bn' ? 'সাইট স্টোরেজ ক্লিয়ার' : 'Clear Site Storage';
     }
     openDashBtn.textContent =
       currentLang === 'bn' ? 'ওয়ার্কস্পেস খুলুন' : 'Open Workspace';
@@ -615,6 +650,51 @@ document.addEventListener('DOMContentLoaded', () => {
     openSidePanelBtn.addEventListener('click', () => {
       chrome.runtime.sendMessage({ type: 'TESTALLY_OPEN_SIDEPANEL' }, () => {
         window.close();
+      });
+    });
+  }
+
+  function triggerManualPageHelper(action) {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tabId = tabs[0]?.id;
+      if (!tabId) return;
+      ensureContentScriptAndSend(
+        tabId,
+        { type: 'VERIPULSE_MANUAL_ACTION', action },
+        (res) => {
+          if (!res?.ok) {
+            statusMsg.textContent =
+              currentLang === 'bn'
+                ? 'এই পেজে অ্যাকশনটি চালানো যাচ্ছে না। সাধারণ http/https ট্যাবে চেষ্টা করুন।'
+                : 'Unavailable on internal browser pages. Switch to any http/https tab.';
+            return;
+          }
+          statusMsg.textContent = res.summary || 'Done!';
+        }
+      );
+    });
+  }
+
+  if (mhRevealPwBtn) {
+    mhRevealPwBtn.addEventListener('click', () => triggerManualPageHelper('reveal_passwords'));
+  }
+  if (mhUnlockPasteBtn) {
+    mhUnlockPasteBtn.addEventListener('click', () => triggerManualPageHelper('unlock_paste'));
+  }
+  if (mhBypassHtml5Btn) {
+    mhBypassHtml5Btn.addEventListener('click', () => triggerManualPageHelper('bypass_html5'));
+  }
+  if (mhUiGlitchBtn) {
+    mhUiGlitchBtn.addEventListener('click', () => triggerManualPageHelper('scan_ui_glitches'));
+  }
+  if (mhClearStorageBtn) {
+    mhClearStorageBtn.addEventListener('click', () => triggerManualPageHelper('clear_storage'));
+  }
+  if (openManualHelperBtn) {
+    openManualHelperBtn.addEventListener('click', () => {
+      chrome.runtime.sendMessage({
+        type: 'TESTALLY_OPEN_DASHBOARD',
+        section: 'manualHelper',
       });
     });
   }

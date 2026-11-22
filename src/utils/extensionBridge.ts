@@ -1502,3 +1502,70 @@ export async function analyzeScreenOrWebsiteWithAi(params: {
     };
   }
 }
+
+export type ManualPageAction =
+  | 'reveal_passwords'
+  | 'unlock_paste'
+  | 'bypass_html5'
+  | 'scan_ui_glitches'
+  | 'highlight_testids'
+  | 'show_hidden_fields'
+  | 'clear_storage'
+  | 'reset_highlights';
+
+export async function runActiveTabManualAction(action: ManualPageAction): Promise<{
+  ok: boolean;
+  summary?: string;
+  count?: number;
+  details?: string[];
+  error?: string;
+}> {
+  const chromeApi = getChrome();
+  if (!chromeApi?.tabs) {
+    return {
+      ok: false,
+      error:
+        'Live tab control requires the installed Chrome Extension. Copy the 1-line DevTools snippet below to run on any browser tab.',
+    };
+  }
+  return new Promise((resolve) => {
+    chromeApi.tabs!.query({ active: true, currentWindow: true }, (tabs) => {
+      const tabId = tabs[0]?.id;
+      if (!tabId) {
+        resolve({ ok: false, error: 'No active browser tab found.' });
+        return;
+      }
+      chromeApi.tabs!.sendMessage(
+        tabId,
+        { type: 'VERIPULSE_MANUAL_ACTION', action },
+        (res) => {
+          const typed = res as
+            | {
+                ok?: boolean;
+                summary?: string;
+                count?: number;
+                details?: string[];
+                error?: string;
+              }
+            | undefined;
+          if (!typed?.ok) {
+            resolve({
+              ok: false,
+              error:
+                typed?.error ||
+                'Active tab did not respond (restricted browser page or reload target tab).',
+            });
+            return;
+          }
+          resolve({
+            ok: true,
+            summary: typed.summary || 'Action completed on active tab.',
+            count: typed.count,
+            details: typed.details,
+          });
+        }
+      );
+    });
+  });
+}
+

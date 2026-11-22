@@ -31,6 +31,7 @@ import {
   Trash2,
   UserCheck,
   Workflow,
+  Wrench,
   X,
 } from 'lucide-react';
 import { AccountSyncModal } from './components/AccountSyncModal';
@@ -41,6 +42,7 @@ import { CoverageInspectorView } from './components/CoverageInspectorView';
 import { ExtensionSandboxView } from './components/ExtensionSandboxView';
 import { FakeGpsView } from './components/FakeGpsView';
 import { FlowchartStudioView } from './components/FlowchartStudioView';
+import { ManualHelperView } from './components/ManualHelperView';
 import { QaArchitectureDiagram } from './components/QaArchitectureDiagram';
 import { QaGuideView } from './components/QaGuideView';
 import { RecycleBinView } from './components/RecycleBinView';
@@ -114,6 +116,7 @@ type SectionKey =
   | 'alerts'
   | 'fakeGps'
   | 'smartScan'
+  | 'manualHelper'
   | 'recycleBin'
   | 'guide'
   | 'extension'
@@ -222,6 +225,14 @@ const NAV_ITEMS: Array<{
     icon: Sparkles,
     activeClass: 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-semibold',
     iconBgClass: 'bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400',
+  },
+  {
+    key: 'manualHelper',
+    stepNum: '13',
+    group: 'suite',
+    icon: Wrench,
+    activeClass: 'bg-teal-50 dark:bg-teal-950/50 text-teal-700 dark:text-teal-300 font-semibold',
+    iconBgClass: 'bg-teal-100 dark:bg-teal-950 text-teal-600 dark:text-teal-400',
   },
   {
     key: 'overview',
@@ -1440,6 +1451,19 @@ export default function App() {
 
             <button
               type="button"
+              onClick={() => handleSelectSection('manualHelper')}
+              className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-colors ${
+                section === 'manualHelper'
+                  ? 'border-teal-400 dark:border-teal-700 bg-teal-100 dark:bg-teal-950 text-teal-800 dark:text-teal-200'
+                  : 'border-teal-200 dark:border-teal-900 bg-teal-50/70 dark:bg-teal-950/30 text-teal-700 dark:text-teal-300 hover:bg-teal-100/80 dark:hover:bg-teal-950/50'
+              }`}
+            >
+              <Wrench className="w-3.5 h-3.5" />
+              {pickLang(lang, UI_COPY.topBar.manualHelp.en, UI_COPY.topBar.manualHelp.bn)}
+            </button>
+
+            <button
+              type="button"
               onClick={() => handleSelectSection('overview')}
               className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${
                 section === 'overview'
@@ -1927,6 +1951,14 @@ export default function App() {
                   screenshotConsentGranted={workspace.settings.screenshotConsentGranted}
                   onUpdateProject={handleUpdateProject}
                   onOpenSection={(s) => handleSelectSection(s as SectionKey)}
+                  onNotify={notify}
+                />
+              )}
+
+              {section === 'manualHelper' && (
+                <ManualHelperView
+                  lang={lang}
+                  defaultDomain={activeProject.domain}
                   onNotify={notify}
                 />
               )}

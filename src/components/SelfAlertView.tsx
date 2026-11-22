@@ -228,14 +228,14 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
     );
   };
 
-  const handleSnooze = (alert: SelfAlert) => {
+  const handleSnooze = (alert: SelfAlert, snoozeMins = 5) => {
     const snoozed: SelfAlert = {
       ...alert,
       id: `alert_${Date.now()}`,
       mode: 'timer',
-      durationSeconds: 300,
-      durationMinutes: 5,
-      triggerAt: Date.now() + 5 * 60 * 1000,
+      durationSeconds: snoozeMins * 60,
+      durationMinutes: snoozeMins,
+      triggerAt: Date.now() + snoozeMins * 60 * 1000,
       status: 'scheduled',
       createdAt: new Date().toISOString(),
     };
@@ -243,8 +243,20 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
     onNotify(
       pickLang(
         lang,
-        'Snoozed alert for 5 minutes.',
-        'অ্যালার্ট ৫ মিনিটের জন্য স্নুজ করা হয়েছে।'
+        `Snoozed alert for ${snoozeMins} minutes.`,
+        `অ্যালার্ট ${snoozeMins} মিনিটের জন্য স্নুজ করা হয়েছে।`
+      )
+    );
+  };
+
+  const handleClearTriggered = () => {
+    if (triggeredAlerts.length === 0) return;
+    triggeredAlerts.forEach((a) => onDeleteAlert(a.id));
+    onNotify(
+      pickLang(
+        lang,
+        'Cleared completed alert history.',
+        'পূর্বের সম্পন্ন অ্যালার্ট তালিকা মুছে ফেলা হয়েছে।'
       )
     );
   };
@@ -347,6 +359,28 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
             </div>
             <div className="flex flex-wrap gap-1.5">
               {[
+                {
+                  mins: 2,
+                  labelEn: '2m Retest',
+                  labelBn: '২মি রি-টেস্ট',
+                  title: pickLang(lang, 'Quick Fix Retest', 'কুইক বাগ রি-টেস্ট'),
+                  msg: pickLang(
+                    lang,
+                    'Re-test latest hotfix on staging and mark bug status.',
+                    'স্টেজিংয়ে ফিক্স হওয়া বাগটি পুনরায় যাচাই করুন।'
+                  ),
+                },
+                {
+                  mins: 10,
+                  labelEn: '10m Deploy Watch',
+                  labelBn: '১০মি ডিপ্লয় ওয়াচ',
+                  title: pickLang(lang, 'Deploy Cutover Check', 'ডিপ্লয়মেন্ট চেক'),
+                  msg: pickLang(
+                    lang,
+                    'Verify production health endpoint and critical login flow.',
+                    'লাইভ সার্ভার হেলথ ও লগইন ফ্লো ঠিক আছে কিনা দেখুন।'
+                  ),
+                },
                 {
                   mins: 15,
                   labelEn: '15m Smoke Check',
@@ -634,6 +668,14 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
               <div className="space-y-2.5">
                 {scheduledAlerts.map((alert) => {
                   const remaining = Math.max(0, alert.triggerAt - nowMs);
+                  const totalWindowMs = Math.max(
+                    1000,
+                    (alert.durationSeconds || (alert.durationMinutes || 5) * 60) * 1000
+                  );
+                  const pctDone = Math.min(
+                    100,
+                    Math.max(0, Math.round(((totalWindowMs - remaining) / totalWindowMs) * 100))
+                  );
                   const fireTime = new Date(alert.triggerAt).toLocaleTimeString([], {
                     hour: '2-digit',
                     minute: '2-digit',
@@ -642,34 +684,42 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
                   return (
                     <div
                       key={alert.id}
-                      className="rounded-xl border border-orange-200/80 dark:border-orange-900/50 bg-orange-50/40 dark:bg-orange-950/20 p-3.5 flex flex-wrap items-center justify-between gap-3"
+                      className="rounded-xl border border-orange-200/80 dark:border-orange-900/50 bg-orange-50/40 dark:bg-orange-950/20 p-3.5 space-y-2.5"
                     >
-                      <div className="space-y-1 min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                            {alert.title}
-                          </span>
-                          <span className="text-[11px] font-mono text-orange-700 dark:text-orange-300">
-                            @ {fireTime}
-                          </span>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="space-y-1 min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                              {alert.title}
+                            </span>
+                            <span className="text-[11px] font-mono text-orange-700 dark:text-orange-300">
+                              @ {fireTime}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 dark:text-slate-300 break-words">
+                            {alert.message}
+                          </p>
                         </div>
-                        <p className="text-xs text-slate-600 dark:text-slate-300 break-words">
-                          {alert.message}
-                        </p>
-                      </div>
 
-                      <div className="flex items-center gap-2.5 shrink-0">
-                        <div className="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-950 text-orange-400 font-mono text-sm font-bold tabular-nums">
-                          {formatCountdown(remaining)}
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          <div className="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-950 text-orange-400 font-mono text-sm font-bold tabular-nums">
+                            {formatCountdown(remaining)}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteAlert(alert.id)}
+                            aria-label="Cancel alert"
+                            className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-rose-600 hover:border-rose-300 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteAlert(alert.id)}
-                          aria-label="Cancel alert"
-                          className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-rose-600 hover:border-rose-300 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                      </div>
+                      <div className="h-1 w-full rounded-full bg-orange-100 dark:bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full bg-orange-500 transition-all duration-500"
+                          style={{ width: `${pctDone}%` }}
+                        />
                       </div>
                     </div>
                   );
@@ -680,14 +730,25 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
 
           {/* Triggered Alert History */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 {pickLang(lang, 'Triggered Alert History', 'পূর্বের সম্পন্ন অ্যালার্ট')}
               </h3>
-              <span className="text-xs font-mono text-slate-400">
-                {triggeredAlerts.length}
-              </span>
+              <div className="flex items-center gap-2.5">
+                {triggeredAlerts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearTriggered}
+                    className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                  >
+                    {pickLang(lang, 'Clear All', 'সব মুছুন')}
+                  </button>
+                )}
+                <span className="text-xs font-mono text-slate-400">
+                  {triggeredAlerts.length}
+                </span>
+              </div>
             </div>
 
             {triggeredAlerts.length === 0 ? (
@@ -727,11 +788,18 @@ export const SelfAlertView: React.FC<SelfAlertViewProps> = ({
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
-                          onClick={() => handleSnooze(alert)}
+                          onClick={() => handleSnooze(alert, 5)}
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-orange-200 dark:border-orange-900 bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 text-[11px] font-semibold cursor-pointer hover:bg-orange-100"
                         >
                           <RotateCcw className="w-3 h-3" />
-                          {pickLang(lang, 'Snooze +5m', 'স্নুজ +৫মি')}
+                          {pickLang(lang, '+5m', '+৫মি')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSnooze(alert, 15)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 text-[11px] font-semibold cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
+                        >
+                          {pickLang(lang, '+15m', '+১৫মি')}
                         </button>
                         <button
                           type="button"

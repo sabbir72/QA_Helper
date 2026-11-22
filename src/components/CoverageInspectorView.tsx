@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   ArrowRight,
   CheckCircle2,
+  Code2,
   Copy,
   Crosshair,
   Download,
@@ -9,6 +10,7 @@ import {
   ScanSearch,
   Search,
   ShieldAlert,
+  Sparkles,
 } from 'lucide-react';
 import { pickLang } from '../i18n/translations';
 import {
@@ -43,6 +45,48 @@ function getSelectorStability(selector: string): {
     return { tier: 'moderate', labelEn: 'Moderate', labelBn: 'মাঝারি' };
   }
   return { tier: 'fragile', labelEn: 'Fragile', labelBn: 'ভঙ্গুর (পরিবর্তনশীল)' };
+}
+
+function suggestPlaywrightLocator(el: Pick<CoverageElement, 'controlType' | 'label' | 'selector'>): string {
+  const testIdMatch = el.selector.match(/data-testid=["']?([^"'\]]+)/i);
+  if (testIdMatch) {
+    return `page.getByTestId('${testIdMatch[1]}')`;
+  }
+  const cleanLabel = el.label.replace(/'/g, "\\'").trim();
+  const roleMap: Record<string, string> = {
+    button: 'button',
+    link: 'link',
+    checkbox: 'checkbox',
+    select: 'combobox',
+    input: 'textbox',
+  };
+  const role = roleMap[el.controlType];
+  if (role && cleanLabel && cleanLabel !== '—' && cleanLabel.length <= 50) {
+    return `page.getByRole('${role}', { name: '${cleanLabel}' })`;
+  }
+  const slug = cleanLabel
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 28) || el.controlType;
+  return `[data-testid="${slug}"]`;
+}
+
+function toCamelIdentifier(label: string, idx: number): string {
+  const cleaned = label
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 4);
+  if (cleaned.length === 0 || !cleaned[0]) return `control${idx + 1}`;
+  const camel = cleaned
+    .map((word, i) =>
+      i === 0
+        ? word.toLowerCase()
+        : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    )
+    .join('');
+  return /^[a-zA-Z]/.test(camel) ? camel : `el${camel}`;
 }
 
 export const CoverageInspectorView: React.FC<CoverageInspectorViewProps> = ({
@@ -80,8 +124,22 @@ export const CoverageInspectorView: React.FC<CoverageInspectorViewProps> = ({
     const fragileCount = lastScan.elements.filter(
       (e) => getSelectorStability(e.selector).tier === 'fragile'
     ).length;
+    const missingLabelCount = lastScan.elements.filter(
+      (e) => !e.label || e.label.trim() === '' || e.label.trim() === '—' || /^(button|input|div)$/i.test(e.label.trim())
+    ).length;
+    const hiddenOrDisabledCount = lastScan.elements.filter(
+      (e) => !e.visible || e.disabled
+    ).length;
     const pct = total > 0 ? Math.round((tested / total) * 100) : 0;
-    return { total, tested, untested: total - tested, fragileCount, pct };
+    return {
+      total,
+      tested,
+      untested: total - tested,
+      fragileCount,
+      missingLabelCount,
+      hiddenOrDisabledCount,
+      pct,
+    };
   }, [lastScan.elements]);
 
   const handleToggleElementTested = (id: string) => {
@@ -167,6 +225,51 @@ export const CoverageInspectorView: React.FC<CoverageInspectorViewProps> = ({
     } catch {
       onNotify?.('Clipboard unavailable.');
     }
+  };
+
+  const handleCopyPageObject = () => {
+    const targetList = filteredElements.length > 0 ? filteredElements : lastScan.elements;
+    if (targetList.length === 0) return;
+    const usedNames = new Set<string>();
+    const getters = targetList.slice(0, 40).map((el, idx) => {
+      let prop = toCamelIdentifier(el.label, idx);
+      if (usedNames.has(prop)) prop = `${prop}${idx + 1}`;
+      usedNames.add(prop);
+      const pw = suggestPlaywrightLocator(el);
+      const expr = pw.startsWith('page.') ? `this.${pw}` : `this.page.locator('${el.selector.replace(/'/g, "\\'")}')`;
+      return `  get ${prop}() { return ${expr}; } // ${el.controlType} (${el.testState})`;
+    });
+    const classCode = `import type { Page } from '@playwright/test';\n\nexport class ScannedPageLocators {\n  constructor(private readonly page: Page) {}\n\n${getters.join('\n')}\n}\n`;
+    copyValue(
+      classCode,
+      pickLang(lang, 'Playwright Page Object (.ts)', 'Playwright পেজ অবজেক্ট')
+    );
+  };
+
+  const handleSendTopUntestedToFlow = () => {
+    const untestedVisible = lastScan.elements
+      .filter((el) => el.testState === 'Untested' && el.visible && !el.disabled)
+      .slice(0, 5);
+    if (untestedVisible.length === 0) {
+      onNotify?.(
+        pickLang(
+          lang,
+          'No untested visible controls left to send!',
+          'পাঠানোর মতো কোনো আন-টেস্টেড দৃশ্যমান কন্ট্রোল বাকি নেই!'
+        )
+      );
+      return;
+    }
+    untestedVisible.forEach((el) => {
+      onSendSelectorToFlow(el.selector, `${el.controlType}: ${el.label}`);
+    });
+    onNotify?.(
+      pickLang(
+        lang,
+        `Sent ${untestedVisible.length} untested control(s) to Active Flow.`,
+        `${untestedVisible.length}টি আন-টেস্টেড কন্ট্রোল অ্যাক্টিভ ফ্লো-তে পাঠানো হয়েছে।`
+      )
+    );
   };
 
   return (
@@ -298,14 +401,34 @@ export const CoverageInspectorView: React.FC<CoverageInspectorViewProps> = ({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {lastScan.elements.length > 0 && (
-              <button
-                type="button"
-                onClick={handleExportCoverageCsv}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer whitespace-nowrap"
-              >
-                <Download className="w-3.5 h-3.5" />
-                {pickLang(lang, 'Export CSV', 'CSV এক্সপোর্ট')}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleCopyPageObject}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50/70 dark:bg-violet-950/30 text-xs font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/40 cursor-pointer whitespace-nowrap"
+                >
+                  <Code2 className="w-3.5 h-3.5" />
+                  {pickLang(lang, 'Copy Page Object', 'পেজ অবজেক্ট কপি')}
+                </button>
+                {metrics.untested > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleSendTopUntestedToFlow}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer whitespace-nowrap"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-violet-600" />
+                    {pickLang(lang, 'Send Top 5 Untested', '৫টি বাকি কন্ট্রোল ফ্লো-তে নিন')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleExportCoverageCsv}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer whitespace-nowrap"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  {pickLang(lang, 'Export CSV', 'CSV এক্সপোর্ট')}
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -323,6 +446,26 @@ export const CoverageInspectorView: React.FC<CoverageInspectorViewProps> = ({
             style={{ width: `${metrics.pct}%` }}
           />
         </div>
+        {metrics.total > 0 && (
+          <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
+            <span>
+              {pickLang(lang, 'Untested:', 'বাকি:')}{' '}
+              <strong className="text-slate-800 dark:text-slate-200">{metrics.untested}</strong>
+            </span>
+            <span aria-hidden="true">·</span>
+            <span className={metrics.fragileCount > 0 ? 'text-amber-700 dark:text-amber-400' : ''}>
+              {pickLang(lang, 'Fragile CSS:', 'দুর্বল লোকেটর:')} {metrics.fragileCount}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span className={metrics.missingLabelCount > 0 ? 'text-rose-700 dark:text-rose-400' : ''}>
+              {pickLang(lang, 'Weak A11y Labels:', 'অ্যাক্সেসিবিলিটি লেবেল কম:')} {metrics.missingLabelCount}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {pickLang(lang, 'Hidden/Disabled:', 'লুকানো/নিষ্ক্রিয়:')} {metrics.hiddenOrDisabledCount}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Filters & Search */}
@@ -465,6 +608,21 @@ export const CoverageInspectorView: React.FC<CoverageInspectorViewProps> = ({
                           {stability.tier === 'fragile' && <ShieldAlert className="w-3.5 h-3.5" />}
                           {pickLang(lang, stability.labelEn, stability.labelBn)}
                         </span>
+                        {stability.tier !== 'resilient' && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              copyValue(
+                                suggestPlaywrightLocator(el),
+                                'Suggested Playwright locator'
+                              )
+                            }
+                            title={pickLang(lang, 'Copy stronger Playwright locator suggestion', 'শক্তিশালী Playwright লোকেটর কপি করুন')}
+                            className="mt-1 block text-left font-mono text-[10px] text-violet-600 dark:text-violet-400 hover:underline truncate max-w-[180px] cursor-pointer"
+                          >
+                            {suggestPlaywrightLocator(el)}
+                          </button>
+                        )}
                       </td>
                       <td className="py-3.5 px-4">
                         <button

@@ -649,8 +649,212 @@
       window.postMessage({ source: 'VERIPULSE_PROBE_GEO_REQ', requestId }, '*');
       return true;
     }
+    if (msg.type === 'VERIPULSE_MANUAL_ACTION') {
+      sendResponse(runManualPageAction(msg.action));
+      return false;
+    }
     return false;
   });
+
+  let pasteUnlocked = false;
+  function runManualPageAction(action) {
+    if (action === 'reveal_passwords') {
+      const inputs = Array.from(
+        document.querySelectorAll('input[type="password"], input[data-vp-pw="1"]')
+      );
+      if (inputs.length === 0) {
+        return { ok: true, count: 0, summary: 'No password inputs found on this page.' };
+      }
+      let revealedCount = 0;
+      let maskedCount = 0;
+      for (const el of inputs) {
+        if (el.type === 'password') {
+          el.dataset.vpPw = '1';
+          el.type = 'text';
+          revealedCount += 1;
+        } else {
+          el.type = 'password';
+          delete el.dataset.vpPw;
+          maskedCount += 1;
+        }
+      }
+      return {
+        ok: true,
+        count: revealedCount || maskedCount,
+        summary:
+          revealedCount > 0
+            ? `Revealed ${revealedCount} password field(s).`
+            : `Re-masked ${maskedCount} password field(s).`,
+      };
+    }
+
+    if (action === 'unlock_paste') {
+      if (!pasteUnlocked) {
+        pasteUnlocked = true;
+        ['paste', 'copy', 'cut', 'contextmenu', 'selectstart'].forEach((evName) => {
+          window.addEventListener(
+            evName,
+            (ev) => {
+              ev.stopImmediatePropagation();
+            },
+            true
+          );
+        });
+      }
+      const controls = Array.from(document.querySelectorAll('input, textarea'));
+      controls.forEach((el) => {
+        el.onpaste = null;
+        el.oncopy = null;
+        el.oncut = null;
+        el.oncontextmenu = null;
+        el.removeAttribute('onpaste');
+        el.removeAttribute('oncopy');
+      });
+      if (document.body) {
+        document.body.oncontextmenu = null;
+        document.body.style.userSelect = 'text';
+      }
+      return {
+        ok: true,
+        count: controls.length,
+        summary: `Unlocked paste, copy & right-click across ${controls.length} input(s).`,
+      };
+    }
+
+    if (action === 'bypass_html5') {
+      const forms = Array.from(document.querySelectorAll('form'));
+      forms.forEach((f) => {
+        f.noValidate = true;
+      });
+      const controls = Array.from(
+        document.querySelectorAll('input, textarea, select, button')
+      );
+      let modified = 0;
+      controls.forEach((el) => {
+        if (
+          el.hasAttribute('required') ||
+          el.hasAttribute('maxlength') ||
+          el.hasAttribute('pattern') ||
+          el.hasAttribute('min') ||
+          el.hasAttribute('max') ||
+          el.disabled ||
+          el.readOnly
+        ) {
+          modified += 1;
+        }
+        el.removeAttribute('required');
+        el.removeAttribute('maxlength');
+        el.removeAttribute('pattern');
+        el.removeAttribute('min');
+        el.removeAttribute('max');
+        el.disabled = false;
+        el.readOnly = false;
+      });
+      return {
+        ok: true,
+        count: modified,
+        summary: `Bypassed HTML5 constraints on ${modified} control(s) across ${forms.length} form(s) for server validation testing.`,
+      };
+    }
+
+    if (action === 'scan_ui_glitches') {
+      const brokenImgs = [];
+      document.querySelectorAll('img').forEach((img) => {
+        if (!img.complete || img.naturalWidth === 0) {
+          img.dataset.vpQaOutline = img.style.outline || '';
+          img.style.outline = '3px dashed #e11d48';
+          brokenImgs.push(img.getAttribute('src') || '(no src)');
+        }
+      });
+      const vw = document.documentElement.clientWidth || window.innerWidth;
+      const overflowItems = [];
+      document.querySelectorAll('body *').forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.right > vw + 1) {
+          el.dataset.vpQaOutline = el.style.outline || '';
+          el.style.outline = '2px solid #f59e0b';
+          overflowItems.push(`${el.tagName.toLowerCase()} (+${Math.round(rect.right - vw)}px)`);
+        }
+      });
+      const details = [
+        ...brokenImgs.slice(0, 5).map((s) => `Broken IMG: ${s.slice(0, 60)}`),
+        ...overflowItems.slice(0, 5).map((o) => `Overflow: ${o}`),
+      ];
+      return {
+        ok: true,
+        count: brokenImgs.length + overflowItems.length,
+        summary: `Found ${brokenImgs.length} broken image(s) & ${overflowItems.length} horizontal overflow element(s).`,
+        details,
+      };
+    }
+
+    if (action === 'highlight_testids') {
+      const nodes = Array.from(
+        document.querySelectorAll('[data-testid], button, input, select, textarea, a[href]')
+      );
+      nodes.forEach((el) => {
+        el.dataset.vpQaOutline = el.style.outline || '';
+        el.style.outline = '1.5px dashed #7c3aed';
+        const tid = el.getAttribute('data-testid');
+        if (tid) {
+          el.title = `[data-testid="${tid}"]`;
+        } else if (el.getAttribute('name') || el.id) {
+          el.title = el.getAttribute('name') || `#${el.id}`;
+        }
+      });
+      return {
+        ok: true,
+        count: nodes.length,
+        summary: `Outlined ${nodes.length} interactive control(s) & [data-testid] hooks.`,
+      };
+    }
+
+    if (action === 'show_hidden_fields') {
+      const hiddens = Array.from(document.querySelectorAll('input[type="hidden"]'));
+      const details = hiddens.slice(0, 10).map((el) => {
+        const key = el.name || el.id || 'unnamed';
+        const raw = String(el.value || '');
+        const masked = /token|secret|csrf|auth|key/i.test(key)
+          ? `${raw.slice(0, 4)}***`
+          : raw.slice(0, 40);
+        return `${key} = "${masked}"`;
+      });
+      return {
+        ok: true,
+        count: hiddens.length,
+        summary: `Detected ${hiddens.length} hidden form input(s) on this page.`,
+        details,
+      };
+    }
+
+    if (action === 'clear_storage') {
+      const lsCount = localStorage.length;
+      const ssCount = sessionStorage.length;
+      localStorage.clear();
+      sessionStorage.clear();
+      return {
+        ok: true,
+        count: lsCount + ssCount,
+        summary: `Cleared ${lsCount} localStorage & ${ssCount} sessionStorage key(s) on this site.`,
+      };
+    }
+
+    if (action === 'reset_highlights') {
+      let cleared = 0;
+      document.querySelectorAll('[data-vp-qa-outline]').forEach((el) => {
+        el.style.outline = el.dataset.vpQaOutline || '';
+        delete el.dataset.vpQaOutline;
+        cleared += 1;
+      });
+      return {
+        ok: true,
+        count: cleared,
+        summary: `Cleared ${cleared} temporary QA outline(s).`,
+      };
+    }
+
+    return { ok: false, error: 'Unknown manual QA action.' };
+  }
 
   function showOnPageSelfAlert(alert) {
     const existing = document.getElementById('testally-self-alert-popup');

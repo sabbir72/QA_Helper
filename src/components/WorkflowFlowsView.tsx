@@ -250,6 +250,72 @@ const FLOW_BLUEPRINTS: Array<{
       },
     ],
   },
+  {
+    id: 'bd_otp_login',
+    labelEn: 'BD Phone & OTP Login',
+    labelBn: 'BD ফোন ও OTP লগইন',
+    name: 'BD Mobile (+880) & 6-Digit OTP Verification',
+    module: 'BD Auth & OTP',
+    steps: [
+      {
+        title: 'Enter BD mobile number (+88017...)',
+        action: 'type',
+        targetElement: '[data-testid="phone-input"]',
+        testData: '+8801711223344',
+        isSensitiveData: false,
+        expectedRule: 'Accepts valid 11-digit BD operator prefix cleanly',
+      },
+      {
+        title: 'Request 6-digit SMS OTP',
+        action: 'click',
+        targetElement: '[data-testid="send-otp-btn"]',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Resend cooldown timer starts; OTP modal opens',
+      },
+      {
+        title: 'Enter OTP code',
+        action: 'type',
+        targetElement: '[data-testid="otp-input"]',
+        testData: '482910',
+        isSensitiveData: true,
+        expectedRule: 'OTP submits and issues verified user session',
+      },
+    ],
+  },
+  {
+    id: 'bd_cod_checkout',
+    labelEn: 'BD COD & Delivery Fee',
+    labelBn: 'BD ডেলিভারি ও COD চেকআউট',
+    name: 'Dhaka vs Outside Delivery & COD Checkout',
+    module: 'BD Logistics & COD',
+    steps: [
+      {
+        title: 'Select delivery district (Dhaka)',
+        action: 'select',
+        targetElement: 'select[name="district"]',
+        testData: 'Dhaka',
+        isSensitiveData: false,
+        expectedRule: 'Delivery fee sets to Inside Dhaka rate (BDT 60)',
+      },
+      {
+        title: 'Choose Cash on Delivery payment method',
+        action: 'check',
+        targetElement: 'input[value="COD"]',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Net payable recalculates with COD rule cleanly',
+      },
+      {
+        title: 'Confirm COD order submission',
+        action: 'click',
+        targetElement: '[data-testid="place-order-btn"]',
+        testData: '',
+        isSensitiveData: false,
+        expectedRule: 'Order confirmation page renders tracking ID',
+      },
+    ],
+  },
 ];
 
 function getSelectorHealth(selector: string): {
@@ -602,6 +668,57 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
         lang,
         `Spec Check completed (${passedCount}/${updatedSteps.length}). For live browser DOM verification, use "Probe Live Tab" in Chrome Extension or run exported pytest.`,
         `স্পেক চেক সম্পন্ন (${passedCount}/${updatedSteps.length})। রিয়েল ওয়েবসাইটে যাচাই করতে ক্রোম এক্সটেনশনে "Probe Live Tab" বা ডাউনলোড করা pytest কোড রান করুন।`
+      )
+    );
+  };
+
+  const handleRunAllFlowsSpecCheck = () => {
+    if (project.flows.length === 0) return;
+    const now = new Date().toISOString();
+    let totalSteps = 0;
+    let totalPassed = 0;
+
+    const nextFlows: WorkflowFlow[] = project.flows.map((flow) => {
+      const updatedSteps: FlowStep[] = flow.steps.map((step) => {
+        totalSteps += 1;
+        if (!step.targetElement.trim()) {
+          return {
+            ...step,
+            status: 'failed',
+            verificationMode: 'spec_check',
+            verifiedAt: now,
+            observedResult: 'Missing element locator — please add a CSS selector or data-testid',
+          };
+        }
+        if (step.action === 'type' && !step.testData && !step.isSensitiveData) {
+          return {
+            ...step,
+            status: 'failed',
+            verificationMode: 'spec_check',
+            verifiedAt: now,
+            observedResult: 'Typing step needs sample text to enter into the field',
+          };
+        }
+        totalPassed += 1;
+        return {
+          ...step,
+          status: 'passed',
+          verificationMode: 'spec_check',
+          verifiedAt: now,
+          observedResult: step.isSensitiveData
+            ? 'Spec Check: Sensitive input masked safely'
+            : `Spec Check: Locator & rule valid (${step.expectedRule || 'Ready for Playwright'})`,
+        };
+      });
+      return { ...flow, lastRunAt: now, steps: updatedSteps };
+    });
+
+    onUpdateProject({ ...project, flows: nextFlows });
+    onNotify?.(
+      pickLang(
+        lang,
+        `Ran Spec Check across all ${project.flows.length} flows: ${totalPassed}/${totalSteps} steps passed.`,
+        `সবগুলো (${project.flows.length}টি) ফ্লো চেক সম্পন্ন: ${totalPassed}/${totalSteps} স্টেপ পাস করেছে।`
       )
     );
   };
@@ -1357,18 +1474,31 @@ export const WorkflowFlowsView: React.FC<WorkflowFlowsViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* Flow Directory */}
         <div className="lg:col-span-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
-          <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between gap-2 px-4 py-3.5 border-b border-slate-200 dark:border-slate-800">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
               {pickLang(lang, 'Test Flows', 'টেস্ট ফ্লো')} ({project.flows.length})
             </h2>
-            <button
-              type="button"
-              onClick={() => setShowNewFlow(!showNewFlow)}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer whitespace-nowrap"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              {pickLang(lang, 'New Flow', 'নতুন ফ্লো')}
-            </button>
+            <div className="flex items-center gap-1">
+              {project.flows.length > 1 && (
+                <button
+                  type="button"
+                  onClick={handleRunAllFlowsSpecCheck}
+                  title={pickLang(lang, 'Run Spec Check across every flow', 'সবগুলো ফ্লো একসাথে যাচাই করুন')}
+                  className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 cursor-pointer whitespace-nowrap"
+                >
+                  <Play className="w-3 h-3" />
+                  {pickLang(lang, 'Run All', 'সব চালান')}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowNewFlow(!showNewFlow)}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {pickLang(lang, 'New Flow', 'নতুন ফ্লো')}
+              </button>
+            </div>
           </div>
 
           {project.flows.length > 0 && (
@@ -2258,6 +2388,29 @@ def test_codegen_setup(page: Page) -> None:
                         onChange={(e) => setNewTestData(e.target.value)}
                         className="px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                       />
+                      <div className="sm:col-span-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <span className="text-slate-500 dark:text-slate-400">
+                          {pickLang(lang, 'Quick Test Data:', 'কুইক ডাটা:')}
+                        </span>
+                        {[
+                          { label: 'QA Email', val: 'qa.user@testmail.dev' },
+                          { label: 'BD Phone', val: '+8801711223344' },
+                          { label: 'Bangla UTF-8', val: 'সাব্বির টেস্ট ✅' },
+                          { label: 'Whitespace Edge', val: '   ' },
+                        ].map((chip) => (
+                          <button
+                            key={chip.label}
+                            type="button"
+                            onClick={() => {
+                              setNewTestData(chip.val);
+                              if (newAction === 'click') setNewAction('type');
+                            }}
+                            className="px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:border-blue-400 cursor-pointer"
+                          >
+                            {chip.label}
+                          </button>
+                        ))}
+                      </div>
                       <input
                         type="text"
                         placeholder="What should happen? (Expected business rule)"

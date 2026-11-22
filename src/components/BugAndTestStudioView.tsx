@@ -7,11 +7,13 @@ import {
   CheckCircle2,
   ClipboardCopy,
   ClipboardList,
+  Clock,
   Download,
   FileSpreadsheet,
   FlaskConical,
   ImagePlus,
   Import,
+  KeyRound,
   Plus,
   RefreshCw,
   Search,
@@ -248,7 +250,72 @@ const NEGATIVE_PACKS: Record<
       expectedResult: 'Resets to Page 1 automatically so matching results are not hidden.',
     },
   ],
+  bd_commerce: [
+    {
+      title: 'Validate BD mobile formats (+88017..., 017..., reject 012/short digits)',
+      module: 'BD Phone & OTP',
+      priority: 'P0',
+      precondition: 'Registration or checkout phone input open',
+      steps: '1. Submit "01211111111" and "017123"\n2. Submit "+8801711223344" vs "01711223344"',
+      testData: '+8801711223344 | 01211111111',
+      expectedResult: 'Rejects invalid prefixes/lengths cleanly; normalizes +880 & 01X consistently.',
+    },
+    {
+      title: 'Block expired or reused 6-digit OTP & enforce resend cooldown',
+      module: 'BD Phone & OTP',
+      priority: 'P0',
+      precondition: 'OTP verification modal active',
+      steps: '1. Enter previously used OTP or wait past expiry\n2. Click Resend rapidly 3 times',
+      testData: 'expired_otp = 482910',
+      expectedResult: 'Old OTP invalidated immediately; Resend button stays locked during cooldown timer.',
+    },
+    {
+      title: 'Verify Inside Dhaka vs Outside Dhaka COD delivery fee calculation',
+      module: 'Delivery & COD',
+      priority: 'P0',
+      precondition: 'Cart has 1+ deliverable item',
+      steps: '1. Select Dhaka -> Gulshan\n2. Switch to Chattogram / Sylhet\n3. Select Cash on Delivery',
+      testData: 'Dhaka=60 BDT vs Outside=120 BDT',
+      expectedResult: 'Delivery fee and Net Payable update immediately across UI summary & order payload.',
+    },
+    {
+      title: 'Prevent duplicate TrxID replay on bKash / Nagad manual verification',
+      module: 'Mobile Banking QA',
+      priority: 'P1',
+      precondition: 'Manual MFS TrxID input available',
+      steps: '1. Submit valid TrxID on Order A\n2. Reuse exact same TrxID on Order B',
+      testData: 'trxId = BKA9X21M4P',
+      expectedResult: 'API returns 409 Conflict; Order B stays unpaid without duplicating wallet credit.',
+    },
+  ],
 };
+
+function decodeJwtUnverified(token: string): {
+  ok: boolean;
+  header?: Record<string, unknown>;
+  payload?: Record<string, unknown>;
+  error?: string;
+} {
+  const clean = token.trim().replace(/^Bearer\s+/i, '');
+  const parts = clean.split('.');
+  if (parts.length < 2) {
+    return { ok: false, error: 'Not a valid 3-part JWT token (header.payload.signature).' };
+  }
+  const decodePart = (b64u: string) => {
+    const b64 = b64u.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const bin = atob(padded);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+  };
+  try {
+    const header = decodePart(parts[0]);
+    const payload = decodePart(parts[1]);
+    return { ok: true, header, payload };
+  } catch {
+    return { ok: false, error: 'Could not decode Base64Url JSON claims.' };
+  }
+}
 
 export const BugAndTestStudioView: React.FC<BugAndTestStudioViewProps> = ({
   project,
@@ -306,6 +373,8 @@ export const BugAndTestStudioView: React.FC<BugAndTestStudioViewProps> = ({
   const [jsonInput, setJsonInput] = useState('');
   const [jsonResult, setJsonResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [utilityInput, setUtilityInput] = useState('');
+  const [jwtInput, setJwtInput] = useState('');
+  const [epochInput, setEpochInput] = useState(() => String(Math.floor(Date.now() / 1000)));
 
   const markCopied = (id: string, text: string, label?: string) => {
     navigator.clipboard?.writeText(text).catch(() => {});
@@ -900,10 +969,54 @@ ${
 
   // Summary metrics
   const openBugsCount = bugs.filter((b) => b.status === 'open' || b.status === 'in_progress').length;
+  const blockerOpenCount = bugs.filter(
+    (b) => b.status !== 'closed' && (b.severity === 'blocker' || b.severity === 'critical')
+  ).length;
   const tcPassedCount = testCases.filter((tc) => tc.status === 'passed').length;
   const tcFailedCount = testCases.filter((tc) => tc.status === 'failed').length;
   const tcPassPct =
     testCases.length > 0 ? Math.round((tcPassedCount / testCases.length) * 100) : 0;
+
+  const decodedJwt = useMemo(() => {
+    if (!jwtInput.trim()) return null;
+    return decodeJwtUnverified(jwtInput);
+  }, [jwtInput]);
+
+  const parsedEpoch = useMemo(() => {
+    const raw = Number(epochInput.trim());
+    if (!epochInput.trim() || !Number.isFinite(raw)) return null;
+    const ms = Math.abs(raw) < 1e12 ? raw * 1000 : raw;
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return null;
+    return {
+      iso: d.toISOString(),
+      dhaka: d.toLocaleString('en-GB', { timeZone: 'Asia/Dhaka', hour12: true }),
+      seconds: Math.floor(ms / 1000),
+      ms,
+    };
+  }, [epochInput]);
+
+  const handleCopyAllOpenBugsMd = () => {
+    const openList = bugs.filter((b) => b.status !== 'closed');
+    if (openList.length === 0) {
+      onNotify?.(t('No open bugs to export!', 'এক্সপোর্ট করার মতো কোনো ওপেন বাগ নেই!'));
+      return;
+    }
+    const md = [
+      `# Open Bugs Summary — ${project.name} (${project.activeEnvironment.toUpperCase()})`,
+      `Total Open: ${openList.length} | Blocker/Critical: ${blockerOpenCount}`,
+      '',
+      ...openList.map(
+        (b) =>
+          `## ${b.bugKey}: ${b.title}\n- **Severity:** ${b.severity.toUpperCase()} · **Priority:** ${b.priority} · **Status:** ${b.status}\n- **Module:** ${b.module}\n- **Expected:** ${b.expectedResult}\n- **Actual:** ${b.actualResult}`
+      ),
+    ].join('\n');
+    markCopied(
+      'bulk_open_bugs_md',
+      md,
+      t(`Copied ${openList.length} open bug(s) as Markdown!`, `${openList.length}টি ওপেন বাগ Markdown হিসেবে কপি হয়েছে!`)
+    );
+  };
 
   return (
     <div className="space-y-5">
@@ -931,6 +1044,18 @@ ${
               <span aria-hidden="true">·</span>
               <span className={tcFailedCount > 0 ? 'text-rose-600 dark:text-rose-400 font-semibold' : ''}>
                 {tcFailedCount} {t('failed', 'ফেইলড')}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span
+                className={
+                  blockerOpenCount > 0 || tcFailedCount > 0
+                    ? 'text-rose-600 dark:text-rose-400 font-bold'
+                    : 'text-emerald-700 dark:text-emerald-400 font-bold'
+                }
+              >
+                {blockerOpenCount > 0 || tcFailedCount > 0
+                  ? t(`HOLD (${blockerOpenCount} Blocker/Critical)`, `হোল্ড (${blockerOpenCount} ব্লকার/ক্রিটিক্যাল)`)
+                  : t('RELEASE GATE: CLEAR', 'রিলিজ গেট: ক্লিয়ার')}
               </span>
             </div>
           </div>
@@ -1273,6 +1398,19 @@ ${
                 </button>
                 <button
                   type="button"
+                  onClick={handleCopyAllOpenBugsMd}
+                  disabled={bugs.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                >
+                  {copiedId === 'bulk_open_bugs_md' ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <ClipboardCopy className="w-3.5 h-3.5" />
+                  )}
+                  {t('Copy Open (.md)', 'সব ওপেন বাগ কপি')}
+                </button>
+                <button
+                  type="button"
                   onClick={handleExportBugsCsv}
                   disabled={bugs.length === 0}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 cursor-pointer whitespace-nowrap"
@@ -1572,6 +1710,9 @@ ${
                 </option>
                 <option value="search">
                   {t('Search & Pagination Filters (2 cases)', 'সার্চ ও ফিল্টার (২টি কেস)')}
+                </option>
+                <option value="bd_commerce">
+                  {t('BD Phone, OTP, COD & MFS TrxID (4 cases)', 'BD ফোন, OTP, COD ও বিকাশ/নগদ (৪টি কেস)')}
                 </option>
               </select>
               <button
@@ -1961,6 +2102,134 @@ ${
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Read-Only JWT Claim Decoder & Unix Epoch Timestamp Converter */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3 shadow-xs">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-red-600 dark:text-red-400" />
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {t('JWT Payload Inspector (Read-Only)', 'JWT টোকেন পেলোড ইন্সপেক্টর')}
+                  </h3>
+                </div>
+                {jwtInput && (
+                  <button
+                    type="button"
+                    onClick={() => setJwtInput('')}
+                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {t('Clear', 'মুছুন')}
+                  </button>
+                )}
+              </div>
+              <textarea
+                rows={3}
+                value={jwtInput}
+                onChange={(e) => setJwtInput(e.target.value)}
+                placeholder={t(
+                  'Paste staging Bearer JWT token to inspect claims & exp timestamp (client-side decode only)...',
+                  'স্টেজিং JWT টোকেন পেস্ট করে role, userId ও মেয়াদ (exp) দেখুন...'
+                )}
+                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+              />
+              {decodedJwt && (
+                decodedJwt.ok ? (
+                  <div className="space-y-2">
+                    {typeof decodedJwt.payload?.exp === 'number' && (
+                      <div className="text-[11px] font-mono">
+                        <span className="text-slate-500">exp: </span>
+                        <span
+                          className={
+                            decodedJwt.payload.exp * 1000 < Date.now()
+                              ? 'text-rose-600 dark:text-rose-400 font-bold'
+                              : 'text-emerald-700 dark:text-emerald-400 font-bold'
+                          }
+                        >
+                          {new Date(decodedJwt.payload.exp * 1000).toLocaleString()} (
+                          {decodedJwt.payload.exp * 1000 < Date.now() ? 'EXPIRED' : 'ACTIVE'})
+                        </span>
+                      </div>
+                    )}
+                    <pre className="p-2.5 rounded-lg bg-slate-950 text-emerald-300 text-[11px] font-mono overflow-x-auto max-h-40">
+                      {JSON.stringify(decodedJwt.payload, null, 2)}
+                    </pre>
+                  </div>
+                ) : (
+                  <div className="text-xs font-mono text-rose-600 dark:text-rose-400">
+                    {decodedJwt.error}
+                  </div>
+                )
+              )}
+            </div>
+
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3 shadow-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-red-600 dark:text-red-400" />
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {t('Epoch Timestamp Converter (Dhaka & UTC)', 'টাইমস্ট্যাম্প কনভার্টার (ঢাকা ও UTC)')}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setEpochInput(String(Math.floor(Date.now() / 1000)))}
+                    className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                  >
+                    Now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEpochInput(String(Math.floor(Date.now() / 1000) + 86400))}
+                    className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                  >
+                    +24h
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEpochInput(String(Math.floor(Date.now() / 1000) - 86400))}
+                    className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
+                  >
+                    -24h
+                  </button>
+                </div>
+              </div>
+              <input
+                type="text"
+                value={epochInput}
+                onChange={(e) => setEpochInput(e.target.value)}
+                placeholder="Unix seconds or milliseconds (e.g. 1760000000)"
+                className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+              />
+              {parsedEpoch ? (
+                <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-3 space-y-1.5 text-xs font-mono">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500">Asia/Dhaka:</span>
+                    <span className="text-slate-900 dark:text-slate-100 font-semibold">{parsedEpoch.dhaka}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500">UTC ISO:</span>
+                    <button
+                      type="button"
+                      onClick={() => markCopied('epoch_iso', parsedEpoch.iso, t('UTC ISO copied!', 'UTC ISO কপি হয়েছে!'))}
+                      className="text-red-600 dark:text-red-400 hover:underline cursor-pointer"
+                    >
+                      {parsedEpoch.iso}
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500">Epoch (ms):</span>
+                    <span className="text-slate-700 dark:text-slate-300">{parsedEpoch.ms}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-400">
+                  {t('Enter a valid Unix timestamp in seconds or milliseconds.', 'সঠিক Unix টাইমস্ট্যাম্প লিখুন।')}
+                </div>
+              )}
             </div>
           </div>
         </div>

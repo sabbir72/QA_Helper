@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  Bug,
   Calculator,
   CheckCircle2,
   Code2,
@@ -18,6 +19,7 @@ import {
 import { pickLang } from '../i18n/translations';
 import {
   AppLanguage,
+  BugReportItem,
   ContentAssertionRule,
   ContentMatchOperator,
   FormulaCheckRule,
@@ -50,6 +52,48 @@ const OPERATOR_LABELS: Record<ContentMatchOperator, { en: string; bn: string }> 
   regex: { en: 'Regex Pattern', bn: 'রেজেক্স (Regex)' },
   max_length: { en: 'Max Characters', bn: 'সর্বোচ্চ অক্ষর সীমা' },
 };
+
+const QUICK_FORMULA_PRESETS: Array<{
+  id: string;
+  labelEn: string;
+  labelBn: string;
+  expression: string;
+  vars: Record<string, number>;
+  actual: number;
+}> = [
+  {
+    id: 'bd_vat_shipping',
+    labelEn: 'BD VAT 15% + Shipping',
+    labelBn: 'ভ্যাট ১৫% + ডেলিভারি',
+    expression: 'round((subtotal - discount) * 1.15 + shipping)',
+    vars: { subtotal: 2000, discount: 200, shipping: 60 },
+    actual: 2130,
+  },
+  {
+    id: 'cod_fee_cap',
+    labelEn: 'COD 1% Fee Cap (Max 100)',
+    labelBn: 'COD ১% চার্জ (সর্বোচ্চ ১০০)',
+    expression: 'round(min(amount * 0.01, 100))',
+    vars: { amount: 14500 },
+    actual: 100,
+  },
+  {
+    id: 'promo_cap',
+    labelEn: 'Promo Discount Cap',
+    labelBn: 'কুপন ডিসকাউন্ট ক্যাপ',
+    expression: 'min(price * qty * pct / 100, maxCap)',
+    vars: { price: 850, qty: 4, pct: 20, maxCap: 500 },
+    actual: 500,
+  },
+  {
+    id: 'seller_payout',
+    labelEn: 'Vendor Net Payout',
+    labelBn: 'ভেন্ডর নেট পেআউট',
+    expression: 'round(gross - (gross * commissionPct / 100) - gatewayFee)',
+    vars: { gross: 5000, commissionPct: 12, gatewayFee: 75 },
+    actual: 4325,
+  },
+];
 
 function flattenJsonLeaves(
   value: unknown,
@@ -314,6 +358,63 @@ export const ContentFormulaView: React.FC<ContentFormulaViewProps> = ({
         'ফর্মুলা টেস্টটি সেভ করা হয়েছে!'
       )
     );
+  };
+
+  const handleLogFormulaBug = (
+    ruleName: string,
+    expr: string,
+    expectedVal: string | number,
+    actualVal: string | number,
+    varsSummary: string
+  ) => {
+    const existing = project.bugReports || [];
+    const now = new Date().toISOString();
+    const bug: BugReportItem = {
+      id: `bug_fml_${Date.now()}`,
+      bugKey: `BUG-${String(existing.length + 1).padStart(2, '0')}`,
+      title: `[Formula Mismatch] ${ruleName}: Expected ${expectedVal}, UI showed ${actualVal}`,
+      module: 'Calculation & Pricing',
+      severity: 'critical',
+      priority: 'P0',
+      status: 'open',
+      environment: project.activeEnvironment,
+      browserInfo: 'VeriPulse Formula Auditor',
+      stepsToReproduce: `1. Apply expression: ${expr}\n2. Input values: ${varsSummary}\n3. Compare computed value with rendered website output`,
+      expectedResult: `Rendered value should equal ${expectedVal}`,
+      actualResult: `Website rendered ${actualVal} (calculation mismatch)`,
+      consoleOrApiNote: `Formula: ${expr}`,
+      createdAt: now,
+      updatedAt: now,
+    };
+    onUpdateProject({ ...project, bugReports: [bug, ...existing] });
+    onNotify?.(
+      pickLang(
+        lang,
+        `Logged ${bug.bugKey} to Bug & Test Studio!`,
+        `${bug.bugKey} বাগ রিপোর্টে যোগ করা হয়েছে!`
+      )
+    );
+  };
+
+  const handleExportFormulasMd = () => {
+    if (formulaChecks.length === 0) return;
+    const lines = [
+      `# Formula & Calculation Audit — ${project.name}`,
+      `Environment: ${project.activeEnvironment.toUpperCase()}`,
+      '',
+      ...formulaChecks.map((f) => {
+        const vars = f.variables.map((v) => `${v.name}=${v.value}`).join(', ');
+        return `- **${f.name}** [${f.status.toUpperCase()}]\n  - Formula: \`${f.expression}\`\n  - Inputs: ${vars || 'none'}\n  - Expected: ${f.computedValue ?? '—'} · Website: ${f.actualDisplayedValue}`;
+      }),
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `veripulse-formulas-${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    onNotify?.(pickLang(lang, 'Exported formula audit (.md).', 'ফর্মুলা অডিট রিপোর্ট (.md) ডাউনলোড হয়েছে।'));
   };
 
   const handleAddFormulaRule = (e: React.FormEvent) => {
@@ -801,6 +902,26 @@ export const ContentFormulaView: React.FC<ContentFormulaViewProps> = ({
               </button>
             </div>
 
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mr-1">
+                {pickLang(lang, 'Presets:', 'রেডি ফর্মুলা:')}
+              </span>
+              {QUICK_FORMULA_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => {
+                    setQuickExpr(preset.expression);
+                    setQuickVars(preset.vars);
+                    setQuickActual(preset.actual);
+                  }}
+                  className="px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:border-fuchsia-400 hover:text-fuchsia-700 dark:hover:text-fuchsia-300 cursor-pointer"
+                >
+                  {pickLang(lang, preset.labelEn, preset.labelBn)}
+                </button>
+              ))}
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
               <div className="lg:col-span-7 space-y-3">
                 <div>
@@ -900,9 +1021,31 @@ export const ContentFormulaView: React.FC<ContentFormulaViewProps> = ({
                       </span>
                     </div>
                     {!quickEval.isComparison && (
-                      <div className="text-[11px] font-mono text-slate-600 dark:text-slate-300">
-                        Expected: {quickEval.value} · Website: {quickActual} · Diff:{' '}
-                        {Math.abs((quickEval.value ?? 0) - quickActual).toFixed(4)}
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-600 dark:text-slate-300">
+                        <span>
+                          Expected: {quickEval.value} · Website: {quickActual} · Diff:{' '}
+                          {Math.abs((quickEval.value ?? 0) - quickActual).toFixed(4)}
+                        </span>
+                        {!quickMatchesWebsite && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleLogFormulaBug(
+                                'Quick Calculator Check',
+                                quickExpr,
+                                quickEval.value ?? 0,
+                                quickActual,
+                                Object.entries(quickVarMap)
+                                  .map(([k, v]) => `${k}=${v}`)
+                                  .join(', ')
+                              )
+                            }
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-sans text-[11px] font-semibold cursor-pointer"
+                          >
+                            <Bug className="w-3 h-3" />
+                            {pickLang(lang, 'Log Bug', 'বাগ লগ')}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -952,6 +1095,16 @@ export const ContentFormulaView: React.FC<ContentFormulaViewProps> = ({
                   <Globe className="w-3.5 h-3.5" />
                   {pickLang(lang, 'Fetch Live Tab & Verify', 'লাইভ পেজ থেকে যাচাই')}
                 </button>
+                {formulaChecks.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleExportFormulasMd}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    {pickLang(lang, 'Export Spec (.md)', 'রিপোর্ট (.md)')}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => handleEvaluateAllFormulas(false)}
@@ -1149,14 +1302,34 @@ export const ContentFormulaView: React.FC<ContentFormulaViewProps> = ({
                       )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteFormula(rule.id)}
-                      className="p-1.5 rounded text-slate-400 hover:text-rose-600 cursor-pointer"
-                      aria-label={`Delete ${rule.name}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {rule.status === 'failed' && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleLogFormulaBug(
+                              rule.name,
+                              rule.expression,
+                              rule.computedValue ?? 'expected',
+                              rule.actualDisplayedValue,
+                              rule.variables.map((v) => `${v.name}=${v.value}`).join(', ')
+                            )
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold cursor-pointer"
+                        >
+                          <Bug className="w-3 h-3" />
+                          {pickLang(lang, 'Log Bug', 'বাগ লগ')}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteFormula(rule.id)}
+                        className="p-1.5 rounded text-slate-400 hover:text-rose-600 cursor-pointer"
+                        aria-label={`Delete ${rule.name}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

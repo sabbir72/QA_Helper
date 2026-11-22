@@ -43,6 +43,7 @@ export const UI_COPY = {
     alerts: { en: 'Self Alerts', bn: 'সেলফ অ্যালার্ট' },
     fakeGps: { en: 'Fake GPS', bn: 'ফেইক জিপিএস' },
     smartScan: { en: 'AI Screen & Site QA', bn: 'স্ক্রিন অটো-ফিল ও QA' },
+    manualHelper: { en: 'Manual QA Helpers', bn: 'ম্যানুয়াল টেস্ট হেল্প' },
     recycleBin: { en: 'Recycle Bin', bn: 'রিসাইকেল বিন' },
     guide: { en: 'All Guidelines', bn: 'সকল গাইডলাইন' },
     extension: { en: 'Chrome Extension', bn: 'ক্রোম এক্সটেনশন' },
@@ -51,6 +52,7 @@ export const UI_COPY = {
   topBar: {
     showDiagram: { en: 'Overview', bn: 'ওভারভিউ' },
     hideDiagram: { en: 'Overview', bn: 'ওভারভিউ' },
+    manualHelp: { en: 'Help-Hand', bn: 'হেল্প-হ্যান্ড' },
     openGuide: { en: 'Guidelines', bn: 'গাইডলাইন' },
     getExtension: { en: 'Get Extension', bn: 'এক্সটেনশন নিন' },
   },

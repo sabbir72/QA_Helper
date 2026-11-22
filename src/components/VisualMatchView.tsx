@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  ArrowLeftRight,
   Bug,
   Camera,
   CheckCircle2,
@@ -15,6 +16,7 @@ import {
   Play,
   ScanEye,
   SlidersHorizontal,
+  Sparkles,
   Trash2,
   Upload,
   XCircle,
@@ -51,6 +53,55 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('Failed to read file'));
     reader.readAsDataURL(file);
   });
+}
+
+function buildSampleUiPair(): { refUrl: string; actualUrl: string } {
+  const drawCard = (variant: 'ref' | 'actual'): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 720;
+    canvas.height = 420;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, 720, 420);
+    // Header bar
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, 720, 56);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('Checkout Summary', 28, 35);
+    // Main card
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+    ctx.fillRect(36, 84, 648, 290);
+    ctx.strokeRect(36, 84, 648, 290);
+    // Line items
+    ctx.fillStyle = '#1e293b';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText('Order #BD-90214 · Dhaka Express', 64, 126);
+    ctx.fillStyle = '#475569';
+    ctx.font = '14px monospace';
+    ctx.fillText('Subtotal:       BDT 2,400.00', 64, 174);
+    ctx.fillText('COD Fee (1%):   BDT    24.00', 64, 206);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 16px monospace';
+    ctx.fillText(
+      variant === 'ref' ? 'Net Payable:    BDT 2,424.00' : 'Net Payable:    BDT 2,499.00',
+      64,
+      250
+    );
+    // Primary CTA button (intentional position & color drift in actual)
+    const btnX = variant === 'ref' ? 64 : 84;
+    const btnY = variant === 'ref' ? 292 : 300;
+    ctx.fillStyle = variant === 'ref' ? '#2563eb' : '#e11d48';
+    ctx.fillRect(btnX, btnY, 220, 44);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('Confirm Order Now', btnX + 42, btnY + 27);
+    return canvas.toDataURL('image/png');
+  };
+  return { refUrl: drawCard('ref'), actualUrl: drawCard('actual') };
 }
 
 export const VisualMatchView: React.FC<VisualMatchViewProps> = ({
@@ -348,8 +399,43 @@ test('${checkName.replace(/'/g, "\\'")}', async ({ page }) => {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              onClick={() => {
+                const { refUrl, actualUrl } = buildSampleUiPair();
+                if (!refUrl || !actualUrl) return;
+                setCheckName('Checkout Visual Regression Demo');
+                setRefImageUrl(refUrl);
+                setActualImageUrl(actualUrl);
+                setDiffResult(null);
+                handleRunComparison(refUrl, actualUrl, 'Checkout Visual Regression Demo');
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-pink-200 dark:border-pink-800 bg-pink-50/70 dark:bg-pink-950/30 text-xs font-semibold text-pink-700 dark:text-pink-300 hover:bg-pink-100 dark:hover:bg-pink-900/40 cursor-pointer whitespace-nowrap"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {pickLang(lang, 'Try Sample Drift', 'স্যাম্পল ম্যাচ টেস্ট')}
+            </button>
+            {(refImageUrl || actualImageUrl) && (
+              <button
+                type="button"
+                onClick={() => {
+                  const nextRef = actualImageUrl;
+                  const nextActual = refImageUrl;
+                  setRefImageUrl(nextRef);
+                  setActualImageUrl(nextActual);
+                  setDiffResult(null);
+                  onNotify?.(
+                    pickLang(lang, 'Swapped Reference and Current Screen images.', 'রেফারেন্স ও বর্তমান স্ক্রিন অদলবদল করা হয়েছে।')
+                  );
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer whitespace-nowrap"
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                {pickLang(lang, 'Swap', 'অদলবদল')}
+              </button>
+            )}
+            <button
+              type="button"
               onClick={() => setShowCodeModal(!showCodeModal)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer whitespace-nowrap"
             >
               <Code2 className="w-3.5 h-3.5" />
               Playwright Snapshot
@@ -722,10 +808,30 @@ test('${checkName.replace(/'/g, "\\'")}', async ({ page }) => {
                 <Bug className="w-3.5 h-3.5" />
                 {pickLang(lang, 'Log Visual Bug', 'বাগ রিপোর্টে পাঠান')}
               </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const md = `## Visual QA Report — ${checkName}
+- **Status:** ${didPass ? 'PASS' : 'MISMATCH'} (${diffResult.matchPct}% match vs ${passThresholdPct}% threshold)
+- **Mismatched Pixels:** ${diffResult.mismatchedPixels.toLocaleString()} / ${diffResult.totalPixels.toLocaleString()} (${diffResult.diffPct}% diff)
+- **Dimensions:** Reference ${diffResult.refWidth}x${diffResult.refHeight} · Screen ${diffResult.actualWidth}x${diffResult.actualHeight}
+- **Changed Zones:** ${diffResult.hotspots.join(', ') || 'None'}`;
+                  try {
+                    await navigator.clipboard.writeText(md);
+                    onNotify?.(pickLang(lang, 'Copied Visual Diff Markdown report!', 'ভিজ্যুয়াল ম্যাচ রিপোর্ট কপি হয়েছে!'));
+                  } catch {
+                    onNotify?.('Clipboard unavailable.');
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-50 cursor-pointer whitespace-nowrap"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                {pickLang(lang, 'Copy Report', 'রিপোর্ট কপি')}
+              </button>
               <a
                 href={diffResult.diffImageUrl}
                 download={`visual-diff-${Date.now()}.png`}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-50 whitespace-nowrap"
               >
                 <Download className="w-3.5 h-3.5" />
                 {pickLang(lang, 'Download Diff PNG', 'ডিফ ইমেজ সেভ')}
